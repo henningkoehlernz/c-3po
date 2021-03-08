@@ -65,6 +65,8 @@ public:
     }
 };
 
+ostream& operator<<(ostream &os, const LazyList &l);
+
 // one-directional graph
 class PartialGraph
 {
@@ -88,7 +90,6 @@ public:
     {
         forward.neighbors[from].push_back(to);
         backward.neighbors[to].push_back(from);
-        DEBUG("inserted edge " << from << " -> " << to);
     }
 
     void remove_node(NodeID node)
@@ -114,6 +115,8 @@ public:
         return deleted.size();
     }
 };
+
+ostream& operator<<(ostream &os, const DiGraph &g);
 
 // break centrality-ties using pseudo-random permutation of node ID
 class WeightedNode
@@ -171,6 +174,8 @@ public:
     }
 };
 
+ostream& operator<<(ostream &os, const LabelSet &l);
+
 class TwoHopCover
 {
 public:
@@ -207,6 +212,8 @@ public:
     }
 };
 
+ostream& operator<<(ostream &os, const TwoHopCover &c);
+
 void propagate_prune(PartialGraph &g, NodeID node, LabelSet &node_labels, vector<LabelSet> &labels)
 {
     // insert self label
@@ -221,7 +228,7 @@ void propagate_prune(PartialGraph &g, NodeID node, LabelSet &node_labels, vector
     while ( !stack.empty() )
     {
         NodeID next = stack.back(); stack.pop_back();
-        if ( !labels[next].intersects(labels[node]) )
+        if ( !labels[next].intersects(node_labels) )
         {
             labels[next].insert(node);
             // prune while we're here
@@ -252,7 +259,7 @@ TwoHopCover pick_propagate_prune(DiGraph &g)
         }
         else
         {
-            DEBUG("picked " << node << " with C=[" << (new_weight >> 32) << ", " << (new_weight & 4294967295u) << "]");
+            DEBUG("picked " << node << " with C=[" << (new_weight >> 32) << ", " << (new_weight & 0xffffffffu) << "]");
             propagate_prune(g.forward, node, labels.out[node], labels.in);
             propagate_prune(g.backward, node, labels.in[node], labels.out);
             g.remove_node(node);
@@ -285,9 +292,6 @@ DiGraph read_graph()
     return g;
 }
 
-ostream& operator<<(ostream &os, const DiGraph &g);
-ostream& operator<<(ostream &os, const TwoHopCover &c);
-
 int main (int argc, char *argv[])
 {
     DiGraph g = read_graph();
@@ -304,7 +308,7 @@ int main (int argc, char *argv[])
     return 0;
 }
 
-// -------------------------- output tools --------------------------
+// -------------------------- output functions --------------------------------
 
 template <typename T>
 std::ostream& operator<<(std::ostream& os, const std::vector<T> &v)
@@ -325,6 +329,11 @@ ostream& operator<<(ostream &os, const LazyList &l)
 ostream& operator<<(ostream &os, const DiGraph &g)
 {
     return os << "DiGraph(\n\tforward=" << g.forward.neighbors << ",\n\tbackward=" << g.backward.neighbors << ",\n\tdeleted=" << g.deleted << "\n)";
+}
+
+ostream& operator<<(ostream &os, const LabelSet &l)
+{
+    return os << static_cast<vector<NodeID>>(l);
 }
 
 ostream& operator<<(ostream &os, const TwoHopCover &c)
