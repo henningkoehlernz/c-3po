@@ -2,9 +2,15 @@
 // compile with g++ -o c3po -O3 -Wall c-3po.cpp
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <iostream>
 #include <queue>
 #include <vector>
+#include <sstream>
+#include <string>
+
+#define DEBUG(X) //cout << X << endl
 
 using namespace std;
 
@@ -78,6 +84,13 @@ public:
 
     DiGraph(size_t size) : forward(deleted, size), backward(deleted, size), deleted(size) {}
 
+    void insert_edge(NodeID from, NodeID to)
+    {
+        forward.neighbors[from].push_back(to);
+        backward.neighbors[to].push_back(from);
+        DEBUG("inserted edge " << from << " -> " << to);
+    }
+
     void remove_node(NodeID node)
     {
         for ( NodeID neighbor : forward.neighbors[node] )
@@ -93,7 +106,7 @@ public:
     {
         uint64_t in = backward.neighbors[node].size();
         uint64_t out = forward.neighbors[node].size();
-        return in <= out ? (in << 32) & out : (out << 32) & in;
+        return in <= out ? (in << 32) | out : (out << 32) | in;
     }
 
     size_t size()
@@ -131,8 +144,6 @@ public:
 class LabelSet : public vector<NodeID>
 {
 public:
-    LabelSet(size_t capacity) : vector(capacity) {}
-
     bool contains(NodeID node) const
     {
         return std::binary_search(cbegin(), cend(), node);
@@ -160,13 +171,41 @@ public:
     }
 };
 
-struct TwoHopCover
+class TwoHopCover
 {
+public:
     vector<LabelSet> in;
     vector<LabelSet> out;
-    TwoHopCover(size_t nodes, size_t label_capacity=4) : in(nodes, label_capacity), out(nodes, label_capacity) {}
-};
+    TwoHopCover(size_t nodes) : in(nodes), out(nodes) {}
 
+    size_t labels() const
+    {
+        size_t sum = 0;
+        for ( const LabelSet &ls : in )
+            sum += ls.size();
+        for ( const LabelSet &ls : out )
+            sum += ls.size();
+        return sum;
+    }
+
+    size_t self_labels() const
+    {
+        size_t sum = 0;
+        for ( NodeID node = 0; node < in.size(); ++node )
+        {
+            if ( in[node].contains(node) )
+                ++sum;
+            if ( out[node].contains(node) )
+                ++sum;
+        }
+        return sum;
+    }
+
+    bool can_reach(NodeID from, NodeID to) const
+    {
+        return from == to || out[from].intersects(in[to]);
+    }
+};
 
 void propagate_prune(PartialGraph &g, NodeID node, LabelSet &node_labels, vector<LabelSet> &labels)
 {
@@ -213,6 +252,7 @@ TwoHopCover pick_propagate_prune(DiGraph &g)
         }
         else
         {
+            DEBUG("picked " << node << " with C=[" << (new_weight >> 32) << ", " << (new_weight & 4294967295u) << "]");
             propagate_prune(g.forward, node, labels.out[node], labels.in);
             propagate_prune(g.backward, node, labels.in[node], labels.out);
             g.remove_node(node);
@@ -221,7 +261,73 @@ TwoHopCover pick_propagate_prune(DiGraph &g)
     return labels;
 }
 
+DiGraph read_graph()
+{
+    size_t nodes;
+    string line;
+    NodeID node;
+    // first line contains #nodes (optionally followed by comment)
+    cin >> nodes;
+    DiGraph g(nodes);
+    getline(cin, line);
+    // remaining lines have the format node child_1 ... child_n
+    while ( cin ) {
+        getline(cin, line);
+        // parse to integers
+        istringstream ss(line);
+        vector<NodeID> node_and_children;
+        while ( ss >> node )
+            node_and_children.push_back(node);
+        // construct graph
+        for ( size_t child = 1; child < node_and_children.size(); ++child )
+            g.insert_edge(node_and_children[0], node_and_children[child]);
+    }
+    return g;
+}
+
+ostream& operator<<(ostream &os, const DiGraph &g);
+ostream& operator<<(ostream &os, const TwoHopCover &c);
+
 int main (int argc, char *argv[])
 {
+    DiGraph g = read_graph();
+    DEBUG("g=" << g);
+    auto t_start = chrono::high_resolution_clock::now();
+    TwoHopCover cover = pick_propagate_prune(g);
+    auto t_stop = chrono::high_resolution_clock::now();
+    long dur_ms = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
+    DEBUG("cover=" << cover);
+    // report stats
+    size_t labels = cover.labels();
+    size_t self_labels = cover.self_labels();
+    cout << "found 2-hop cover with " << labels - self_labels << " remote and " << self_labels << " self labels in " << static_cast<double>(dur_ms) / 1000.0 << "s" << endl;
     return 0;
+}
+
+// -------------------------- output tools --------------------------
+
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const std::vector<T> &v)
+{
+    os << "[";
+    for ( size_t i = 0; i < v.size(); i++ )
+    {
+        os << (i ? ", " : " ") << i << ": " << v[i];
+    }
+    return os << " ]";
+}
+
+ostream& operator<<(ostream &os, const LazyList &l)
+{
+    return os << l.size() << " of " << static_cast<vector<NodeID>>(l);
+}
+
+ostream& operator<<(ostream &os, const DiGraph &g)
+{
+    return os << "DiGraph(\n\tforward=" << g.forward.neighbors << ",\n\tbackward=" << g.backward.neighbors << ",\n\tdeleted=" << g.deleted << "\n)";
+}
+
+ostream& operator<<(ostream &os, const TwoHopCover &c)
+{
+    return os << "2HOP(\n\tin=" << c.in << ",\n\tout=" << c.out << "\n)";
 }
