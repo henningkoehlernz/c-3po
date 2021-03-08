@@ -73,8 +73,9 @@ class PartialGraph
 public:
     vector<LazyList> neighbors;
     const vector<bool> &deleted;
+    vector<NodeID> &last_visited;
 
-    PartialGraph(const vector<bool> &deleted, size_t size) : neighbors(size), deleted(deleted) {}
+    PartialGraph(const vector<bool> &deleted, vector<NodeID> &last_visited, size_t size) : neighbors(size), deleted(deleted), last_visited(last_visited) {}
 };
 
 class DiGraph
@@ -83,8 +84,10 @@ public:
     PartialGraph forward;
     PartialGraph backward;
     vector<bool> deleted;
+    // for tracking visited nodes during propagation
+    vector<NodeID> last_visited;
 
-    DiGraph(size_t size) : forward(deleted, size), backward(deleted, size), deleted(size) {}
+    DiGraph(size_t size) : forward(deleted, last_visited, size), backward(deleted, last_visited, size), deleted(size), last_visited(size, UINT32_MAX) {}
 
     void insert_edge(NodeID from, NodeID to)
     {
@@ -216,9 +219,6 @@ ostream& operator<<(ostream &os, const TwoHopCover &c);
 
 void propagate_prune(PartialGraph &g, NodeID node, LabelSet &node_labels, vector<LabelSet> &labels)
 {
-    // insert self label
-    if ( g.neighbors[node].size() )
-        node_labels.insert(node);
     // propagate remote labels
     vector<NodeID> stack;
     for ( NodeID neighbor : g.neighbors[node] )
@@ -228,8 +228,9 @@ void propagate_prune(PartialGraph &g, NodeID node, LabelSet &node_labels, vector
     while ( !stack.empty() )
     {
         NodeID next = stack.back(); stack.pop_back();
-        if ( !labels[next].intersects(node_labels) )
+        if ( g.last_visited[next] != node && !labels[next].intersects(node_labels) )
         {
+            g.last_visited[next] = node;
             labels[next].insert(node);
             // prune while we're here
             g.neighbors[next].prune(g.deleted);
@@ -237,6 +238,9 @@ void propagate_prune(PartialGraph &g, NodeID node, LabelSet &node_labels, vector
                 stack.push_back(neighbor);
         }
     }
+    // insert self label
+    if ( g.neighbors[node].size() )
+        node_labels.insert(node);
 }
 
 TwoHopCover pick_propagate_prune(DiGraph &g)
