@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <queue>
 #include <vector>
@@ -246,11 +247,29 @@ void propagate_prune(PartialGraph &g, NodeID node, LabelSet &node_labels, vector
 TwoHopCover pick_propagate_prune(DiGraph &g)
 {
     TwoHopCover labels(g.size());
+    // first node is handled separately to reduce priority queue updates for graphs with high-degree nodes
+    NodeID top_node = 0;
+    NodeID top_centrality = g.centrality(0);
+    for ( NodeID node = 1; node < g.size(); ++node )
+    {
+        uint64_t centrality = g.centrality(node);
+        if ( centrality > top_centrality )
+        {
+            top_node = node;
+            top_centrality = centrality;
+        }
+    }
+    DEBUG("top-node: " << node << " with C=[" << (top_centrality >> 32) << ", " << (top_centrality & 0xffffffffu) << "]");
+    propagate_prune(g.forward, top_node, labels.out[top_node], labels.in);
+    propagate_prune(g.backward, top_node, labels.in[top_node], labels.out);
+    g.remove_node(top_node);
     // order nodes by centrality
     priority_queue<WeightedNode> q;
     for ( NodeID node = 0; node < g.size(); ++node )
-        q.push(WeightedNode(g.centrality(node), node));
+        if ( node != top_node )
+            q.push(WeightedNode(g.centrality(node), node));
     // pick top-ranked node, updating centrality lazily
+    size_t q_reinsert = 0;
     while ( !q.empty() )
     {
         WeightedNode weighted = q.top(); q.pop();
@@ -260,6 +279,7 @@ TwoHopCover pick_propagate_prune(DiGraph &g)
         {
             weighted.weight = new_weight;
             q.push(weighted);
+            ++q_reinsert;
         }
         else
         {
@@ -269,21 +289,22 @@ TwoHopCover pick_propagate_prune(DiGraph &g)
             g.remove_node(node);
         }
     }
+    cout << "PPP: " << q_reinsert << " queue re-insertions" << endl;
     return labels;
 }
 
-DiGraph read_graph()
+DiGraph read_graph(std::istream &in)
 {
     size_t nodes;
     string line;
     NodeID node;
     // first line contains #nodes (optionally followed by comment)
-    cin >> nodes;
+    in >> nodes;
     DiGraph g(nodes);
-    getline(cin, line);
+    getline(in, line);
     // remaining lines have the format node child_1 ... child_n
-    while ( cin ) {
-        getline(cin, line);
+    while ( in ) {
+        getline(in, line);
         // parse to integers
         istringstream ss(line);
         vector<NodeID> node_and_children;
@@ -296,19 +317,29 @@ DiGraph read_graph()
     return g;
 }
 
+DiGraph read_graph_from_file(char* filename)
+{
+    ifstream ifs(filename);
+    return read_graph(ifs);
+}
+
 int main (int argc, char *argv[])
 {
-    DiGraph g = read_graph();
-    DEBUG("g=" << g);
-    auto t_start = chrono::high_resolution_clock::now();
-    TwoHopCover cover = pick_propagate_prune(g);
-    auto t_stop = chrono::high_resolution_clock::now();
-    long dur_ms = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
-    DEBUG("cover=" << cover);
-    // report stats
-    size_t labels = cover.labels();
-    size_t self_labels = cover.self_labels();
-    cout << "found 2-hop cover with " << labels - self_labels << " remote and " << self_labels << " self labels in " << static_cast<double>(dur_ms) / 1000.0 << "s" << endl;
+    DiGraph g = argc > 1 ? read_graph_from_file(argv[1]) : read_graph(std::cin);
+    cout << "parsed graph (" << g.size() << " nodes)" << endl;
+    if ( g.size() )
+    {
+        DEBUG("g=" << g);
+        auto t_start = chrono::high_resolution_clock::now();
+        TwoHopCover cover = pick_propagate_prune(g);
+        auto t_stop = chrono::high_resolution_clock::now();
+        long dur_ms = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
+        DEBUG("cover=" << cover);
+        // report stats
+        size_t labels = cover.labels();
+        size_t self_labels = cover.self_labels();
+        cout << "found 2-hop cover with " << labels - self_labels << " remote and " << self_labels << " self labels in " << static_cast<double>(dur_ms) / 1000.0 << "s" << endl;
+    }
     return 0;
 }
 
