@@ -10,6 +10,7 @@
 #include <vector>
 #include <sstream>
 #include <string>
+#include <set>
 
 #define DEBUG(X) //cout << X << endl
 
@@ -111,7 +112,8 @@ public:
     {
         uint64_t in = backward.neighbors[node].size();
         uint64_t out = forward.neighbors[node].size();
-        return in <= out ? (in << 32) | out : (out << 32) | in;
+        //return in <= out ? (in << 32) | out : (out << 32) | in;
+        return in * out;
     }
 
     size_t size()
@@ -147,38 +149,94 @@ public:
     }
 };
 
-// labels are stored as sorted vector - fast for small sets
-class LabelSet : public vector<NodeID>
+// alternative implementations for set intersection, selected based on set size/type
+template<typename C>
+bool sorted_intersect(const C &ca, const C &cb)
 {
+    auto a = ca.cbegin();
+    auto b = cb.cbegin();
+    while ( a != ca.cend() && b != cb.cend() )
+    {
+        if ( *a < *b )
+            ++a;
+        else if ( *a > *b )
+            ++b;
+        else
+            return true;
+    }
+    return false;
+}
+
+template<typename C>
+bool set_intersect(const set<NodeID> &s, const C &c)
+{
+    for ( NodeID val : c )
+        if ( s.find(val) != s.end() )
+            return true;
+    return false;
+}
+
+// labels are stored as sorted vector - fast for small sets
+class LabelSet
+{
+    vector<NodeID> v;
+    set<NodeID> *s = nullptr;
 public:
     bool contains(NodeID node) const
     {
-        return std::binary_search(cbegin(), cend(), node);
+        if ( s )
+            return s->find(node) != s->cend();
+        else
+            return std::binary_search(v.cbegin(), v.cend(), node);
     }
 
     void insert(NodeID node)
     {
-        vector::insert(std::upper_bound(cbegin(), cend(), node), node);
+        // check if it's time to switch to set implementation
+        if ( s )
+            s->insert(node);
+        else
+        {
+            v.insert(std::upper_bound(v.cbegin(), v.cend(), node), node);
+            // switch to s implementation
+            if ( v.size() >= 1000 )
+            {
+                s = new set<NodeID>(v.cbegin(), v.cend());
+                v.clear();
+                v.shrink_to_fit();
+            }
+        }
     }
 
     bool intersects(const LabelSet &other) const
     {
-        auto a = cbegin();
-        auto b = other.cbegin();
-        while ( a < cend() && b < other.cend() )
+        if ( s )
         {
-            if ( *a < *b )
-                ++a;
-            else if ( *a > *b )
-                ++b;
-            else
-                return true;
+            if ( other.s )
+                return sorted_intersect(*s, *other.s);
+            return set_intersect(*s, other.v);
         }
-        return false;
+        if ( other.s )
+            return set_intersect(*other.s, v);
+        return sorted_intersect(v, other.v);
     }
-};
 
-ostream& operator<<(ostream &os, const LabelSet &l);
+    size_t size() const
+    {
+        if ( s )
+            return s->size();
+        else
+            return v.size();
+    }
+
+    ~LabelSet()
+    {
+        if ( s )
+            delete s;
+    }
+
+    friend ostream& operator<<(ostream &os, const LabelSet &l);
+};
 
 class TwoHopCover
 {
@@ -259,7 +317,7 @@ TwoHopCover pick_propagate_prune(DiGraph &g)
             top_centrality = centrality;
         }
     }
-    DEBUG("top-node: " << node << " with C=[" << (top_centrality >> 32) << ", " << (top_centrality & 0xffffffffu) << "]");
+    DEBUG("top-node: " << top_node << " with C=[" << (top_centrality >> 32) << ", " << (top_centrality & 0xffffffffu) << "]");
     propagate_prune(g.forward, top_node, labels.out[top_node], labels.in);
     propagate_prune(g.backward, top_node, labels.in[top_node], labels.out);
     g.remove_node(top_node);
@@ -356,6 +414,17 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T> &v)
     return os << " ]";
 }
 
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const std::set<T> &s)
+{
+    os << "{";
+    for ( T e : s )
+    {
+        os << " " << e;
+    }
+    return os << " }";
+}
+
 ostream& operator<<(ostream &os, const LazyList &l)
 {
     return os << l.size() << " of " << static_cast<vector<NodeID>>(l);
@@ -368,7 +437,10 @@ ostream& operator<<(ostream &os, const DiGraph &g)
 
 ostream& operator<<(ostream &os, const LabelSet &l)
 {
-    return os << static_cast<vector<NodeID>>(l);
+    if ( l.s )
+        return os << *l.s;
+    else
+        return os << static_cast<vector<NodeID>>(l.v);
 }
 
 ostream& operator<<(ostream &os, const TwoHopCover &c)
