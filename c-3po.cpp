@@ -249,7 +249,7 @@ TwoHopCover pick_propagate_prune(DiGraph &g)
     TwoHopCover labels(g.size());
     // first node is handled separately to reduce priority queue updates for graphs with high-degree nodes
     NodeID top_node = 0;
-    NodeID top_centrality = g.centrality(0);
+    uint64_t top_centrality = g.centrality(0);
     for ( NodeID node = 1; node < g.size(); ++node )
     {
         uint64_t centrality = g.centrality(node);
