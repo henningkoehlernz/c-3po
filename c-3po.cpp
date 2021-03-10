@@ -112,8 +112,7 @@ public:
     {
         uint64_t in = backward.neighbors[node].size();
         uint64_t out = forward.neighbors[node].size();
-        //return in <= out ? (in << 32) | out : (out << 32) | in;
-        return in * out;
+        return in <= out ? (in << 32) | out : (out << 32) | in;
     }
 
     size_t size()
@@ -305,27 +304,10 @@ void propagate_prune(PartialGraph &g, NodeID node, LabelSet &node_labels, vector
 TwoHopCover pick_propagate_prune(DiGraph &g)
 {
     TwoHopCover labels(g.size());
-    // first node is handled separately to reduce priority queue updates for graphs with high-degree nodes
-    NodeID top_node = 0;
-    uint64_t top_centrality = g.centrality(0);
-    for ( NodeID node = 1; node < g.size(); ++node )
-    {
-        uint64_t centrality = g.centrality(node);
-        if ( centrality > top_centrality )
-        {
-            top_node = node;
-            top_centrality = centrality;
-        }
-    }
-    DEBUG("top-node: " << top_node << " with C=[" << (top_centrality >> 32) << ", " << (top_centrality & 0xffffffffu) << "]");
-    propagate_prune(g.forward, top_node, labels.out[top_node], labels.in);
-    propagate_prune(g.backward, top_node, labels.in[top_node], labels.out);
-    g.remove_node(top_node);
     // order nodes by centrality
     priority_queue<WeightedNode> q;
     for ( NodeID node = 0; node < g.size(); ++node )
-        if ( node != top_node )
-            q.push(WeightedNode(g.centrality(node), node));
+        q.push(WeightedNode(g.centrality(node), node));
     // pick top-ranked node, updating centrality lazily
     size_t q_reinsert = 0;
     while ( !q.empty() )
