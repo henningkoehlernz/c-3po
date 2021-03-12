@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <queue>
@@ -189,7 +190,7 @@ public:
             return std::binary_search(v.cbegin(), v.cend(), node);
     }
 
-    void insert(NodeID node)
+    void insert(NodeID node, bool dynamic=true)
     {
         // check if it's time to switch to set implementation
         if ( s )
@@ -198,12 +199,24 @@ public:
         {
             v.insert(std::upper_bound(v.cbegin(), v.cend(), node), node);
             // switch to s implementation
-            if ( v.size() >= 1000 )
+            if ( v.size() >= 1000 && dynamic )
             {
                 s = new set<NodeID>(v.cbegin(), v.cend());
                 v.clear();
                 v.shrink_to_fit();
             }
+        }
+    }
+
+    void erase(NodeID node)
+    {
+        if ( s )
+            s->erase(node);
+        else
+        {
+            auto pos = std::lower_bound(v.cbegin(), v.cend(), node);
+            if ( pos != v.cend() && *pos == node )
+                v.erase(pos);
         }
     }
 
@@ -228,6 +241,18 @@ public:
             return v.size();
     }
 
+    void vectorize()
+    {
+        if ( s )
+        {
+            // nodes are sorted in s, so no need to re-sort
+            for ( NodeID node : *s )
+                v.push_back(node);
+            delete s;
+            s = nullptr;
+        }
+    }
+
     ~LabelSet()
     {
         if ( s )
@@ -235,6 +260,7 @@ public:
     }
 
     friend ostream& operator<<(ostream &os, const LabelSet &l);
+    friend class TwoHopCover;
 };
 
 class TwoHopCover
@@ -267,9 +293,52 @@ public:
         return sum;
     }
 
-    bool can_reach(NodeID from, NodeID to) const
+    // functions for reachability testing
+
+    void vectorize()
     {
-        return from == to || out[from].intersects(in[to]);
+        for ( NodeID node = 0; node < in.size(); ++node )
+        {
+            in[node].vectorize();
+            out[node].vectorize();
+        }
+    }
+
+    void erase_self()
+    {
+        for ( NodeID node = 0; node < in.size(); ++node )
+        {
+            in[node].erase(node);
+            out[node].erase(node);
+        }
+    }
+
+    void insert_self()
+    {
+        for ( NodeID node = 0; node < in.size(); ++node )
+        {
+            in[node].insert(node, false);
+            out[node].insert(node, false);
+        }
+    }
+
+    bool can_reach_all_self(NodeID from, NodeID to) const
+    {
+        return sorted_intersect(out[from].v, in[to].v);
+    }
+
+    bool can_reach_remote(NodeID from, NodeID to) const
+    {
+        return from == to
+            || sorted_intersect(out[from].v, in[to].v);
+    }
+
+    bool can_reach_no_self(NodeID from, NodeID to) const
+    {
+        return from == to
+            || std::binary_search(out[from].v.cbegin(), out[from].v.cend(), to)
+            || std::binary_search(in[to].v.cbegin(), in[to].v.cend(), from)
+            || sorted_intersect(out[from].v, in[to].v);
     }
 };
 
@@ -363,6 +432,17 @@ DiGraph read_graph_from_file(char* filename)
     return read_graph(ifs);
 }
 
+struct Query
+{
+    NodeID from, to;
+    Query(NodeID from, NodeID to) : from(from), to(to) {}
+};
+
+Query random_query(size_t nodes)
+{
+    return Query(std::rand() % nodes, std::rand() % nodes);
+}
+
 int main (int argc, char *argv[])
 {
     DiGraph g = argc > 1 ? read_graph_from_file(argv[1]) : read_graph(std::cin);
@@ -379,6 +459,35 @@ int main (int argc, char *argv[])
         size_t labels = cover.labels();
         size_t self_labels = cover.self_labels();
         cout << "found 2-hop cover with " << labels - self_labels << " remote and " << self_labels << " self labels in " << static_cast<double>(dur_ms) / 1000.0 << "s" << endl;
+        // test query speed
+        vector<Query> queries;
+        for ( int i = 0; i < 1000000; ++i )
+            queries.push_back(random_query(g.size()));
+        // fast updates are no longer needed, so switch to vector implementation
+        cover.vectorize();
+        // time all three label storage variants
+        t_start = chrono::high_resolution_clock::now();
+        for ( Query q : queries )
+            cover.can_reach_remote(q.from, q.to);
+        t_stop = chrono::high_resolution_clock::now();
+        long dur_remote = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
+        cout << "Processed 1M queries in " << dur_remote << "ms using remote-referenced self-labels" << endl;
+        // no self-labels
+        cover.erase_self();
+        t_start = chrono::high_resolution_clock::now();
+        for ( Query q : queries )
+            cover.can_reach_no_self(q.from, q.to);
+        t_stop = chrono::high_resolution_clock::now();
+        long dur_no_self = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
+        cout << "Processed 1M queries in " << dur_no_self << "ms using no self-labels" << endl;
+        // all self-labels
+        cover.insert_self();
+        t_start = chrono::high_resolution_clock::now();
+        for ( Query q : queries )
+            cover.can_reach_all_self(q.from, q.to);
+        t_stop = chrono::high_resolution_clock::now();
+        long dur_all_self = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
+        cout << "Processed 1M queries in " << dur_all_self << "ms using all self-labels" << endl;
     }
     return 0;
 }
