@@ -11,9 +11,21 @@
 #include <vector>
 #include <sstream>
 #include <string>
-#include <set>
 
 #define DEBUG(X) //cout << X << endl
+
+const size_t query_count = 1000000ul;
+
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const std::vector<T> &v)
+{
+    os << "[";
+    for ( size_t i = 0; i < v.size(); i++ )
+    {
+        os << (i ? ", " : " ") << i << ": " << v[i];
+    }
+    return os << " ]";
+}
 
 using namespace std;
 
@@ -149,7 +161,7 @@ public:
     }
 };
 
-// alternative implementations for set intersection, selected based on set size/type
+// functions for dealing with label sets
 template<typename C>
 bool sorted_intersect(const C &ca, const C &cb)
 {
@@ -167,101 +179,27 @@ bool sorted_intersect(const C &ca, const C &cb)
     return false;
 }
 
-template<typename C>
-bool set_intersect(const set<NodeID> &s, const C &c)
+template<typename C,typename E>
+void sorted_insert(C &c, E e)
 {
-    for ( NodeID val : c )
-        if ( s.find(val) != s.end() )
-            return true;
-    return false;
+    auto pos = std::lower_bound(c.cbegin(), c.cend(), e);
+    c.insert(pos, e);
 }
 
-// labels are stored as sorted vector - fast for small sets
-class LabelSet
+template<typename C,typename E>
+void sorted_erase(C &c, E e)
 {
-    vector<NodeID> v;
-    set<NodeID> *s = nullptr;
-public:
-    bool contains(NodeID node) const
-    {
-        if ( s )
-            return s->find(node) != s->cend();
-        else
-            return std::binary_search(v.cbegin(), v.cend(), node);
-    }
+    auto pos = std::lower_bound(c.cbegin(), c.cend(), e);
+    if ( pos != c.cend() && *pos == e )
+        c.erase(pos);
+}
 
-    void insert(NodeID node, bool dynamic=true)
-    {
-        // check if it's time to switch to set implementation
-        if ( s )
-            s->insert(node);
-        else
-        {
-            v.insert(std::upper_bound(v.cbegin(), v.cend(), node), node);
-            // switch to s implementation
-            if ( v.size() >= 1000 && dynamic )
-            {
-                s = new set<NodeID>(v.cbegin(), v.cend());
-                v.clear();
-                v.shrink_to_fit();
-            }
-        }
-    }
+typedef vector<NodeID> LabelSet;
 
-    void erase(NodeID node)
-    {
-        if ( s )
-            s->erase(node);
-        else
-        {
-            auto pos = std::lower_bound(v.cbegin(), v.cend(), node);
-            if ( pos != v.cend() && *pos == node )
-                v.erase(pos);
-        }
-    }
-
-    bool intersects(const LabelSet &other) const
-    {
-        if ( s )
-        {
-            if ( other.s )
-                return sorted_intersect(*s, *other.s);
-            return set_intersect(*s, other.v);
-        }
-        if ( other.s )
-            return set_intersect(*other.s, v);
-        return sorted_intersect(v, other.v);
-    }
-
-    size_t size() const
-    {
-        if ( s )
-            return s->size();
-        else
-            return v.size();
-    }
-
-    void vectorize()
-    {
-        if ( s )
-        {
-            // nodes are sorted in s, so no need to re-sort
-            for ( NodeID node : *s )
-                v.push_back(node);
-            delete s;
-            s = nullptr;
-        }
-    }
-
-    ~LabelSet()
-    {
-        if ( s )
-            delete s;
-    }
-
-    friend ostream& operator<<(ostream &os, const LabelSet &l);
-    friend class TwoHopCover;
-};
+bool contains(const LabelSet &labels, NodeID node)
+{
+    return std::binary_search(labels.cbegin(), labels.cend(), node);
+}
 
 class TwoHopCover
 {
@@ -285,31 +223,38 @@ public:
         size_t sum = 0;
         for ( NodeID node = 0; node < in.size(); ++node )
         {
-            if ( in[node].contains(node) )
+            if ( contains(in[node], node) )
                 ++sum;
-            if ( out[node].contains(node) )
+            if ( contains(out[node], node) )
                 ++sum;
         }
         return sum;
     }
 
-    // functions for reachability testing
-
-    void vectorize()
+    void map(vector<NodeID> f)
     {
-        for ( NodeID node = 0; node < in.size(); ++node )
+        for ( LabelSet &ls : in )
         {
-            in[node].vectorize();
-            out[node].vectorize();
+            for ( NodeID &label : ls )
+                label = f[label];
+            sort(ls.begin(), ls.end());
+        }
+        for ( LabelSet &ls : out )
+        {
+            for ( NodeID &label : ls )
+                label = f[label];
+            sort(ls.begin(), ls.end());
         }
     }
+
+    // functions for reachability testing
 
     void erase_self()
     {
         for ( NodeID node = 0; node < in.size(); ++node )
         {
-            in[node].erase(node);
-            out[node].erase(node);
+            sorted_erase(in[node], node);
+            sorted_erase(out[node], node);
         }
     }
 
@@ -317,34 +262,34 @@ public:
     {
         for ( NodeID node = 0; node < in.size(); ++node )
         {
-            in[node].insert(node, false);
-            out[node].insert(node, false);
+            sorted_insert(in[node], node);
+            sorted_insert(out[node], node);
         }
     }
 
     bool can_reach_all_self(NodeID from, NodeID to) const
     {
-        return sorted_intersect(out[from].v, in[to].v);
+        return sorted_intersect(out[from], in[to]);
     }
 
     bool can_reach_remote(NodeID from, NodeID to) const
     {
         return from == to
-            || sorted_intersect(out[from].v, in[to].v);
+            || sorted_intersect(out[from], in[to]);
     }
 
     bool can_reach_no_self(NodeID from, NodeID to) const
     {
         return from == to
-            || std::binary_search(out[from].v.cbegin(), out[from].v.cend(), to)
-            || std::binary_search(in[to].v.cbegin(), in[to].v.cend(), from)
-            || sorted_intersect(out[from].v, in[to].v);
+            || std::binary_search(out[from].cbegin(), out[from].cend(), to)
+            || std::binary_search(in[to].cbegin(), in[to].cend(), from)
+            || sorted_intersect(out[from], in[to]);
     }
 };
 
 ostream& operator<<(ostream &os, const TwoHopCover &c);
 
-void propagate_prune(PartialGraph &g, NodeID node, LabelSet &node_labels, vector<LabelSet> &labels)
+void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_labels, vector<LabelSet> &labels)
 {
     // propagate remote labels
     vector<NodeID> stack;
@@ -355,10 +300,10 @@ void propagate_prune(PartialGraph &g, NodeID node, LabelSet &node_labels, vector
     while ( !stack.empty() )
     {
         NodeID next = stack.back(); stack.pop_back();
-        if ( g.last_visited[next] != node && !labels[next].intersects(node_labels) )
+        if ( g.last_visited[next] != node && !sorted_intersect(labels[next], node_labels) )
         {
             g.last_visited[next] = node;
-            labels[next].insert(node);
+            labels[next].push_back(label);
             // prune while we're here
             g.neighbors[next].prune(g.deleted);
             for ( NodeID neighbor : g.neighbors[next] )
@@ -367,10 +312,10 @@ void propagate_prune(PartialGraph &g, NodeID node, LabelSet &node_labels, vector
     }
     // insert self label
     if ( g.neighbors[node].size() )
-        node_labels.insert(node);
+        node_labels.push_back(label);
 }
 
-TwoHopCover pick_propagate_prune(DiGraph &g)
+TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order)
 {
     TwoHopCover labels(g.size());
     // order nodes by centrality
@@ -378,7 +323,6 @@ TwoHopCover pick_propagate_prune(DiGraph &g)
     for ( NodeID node = 0; node < g.size(); ++node )
         q.push(WeightedNode(g.centrality(node), node));
     // pick top-ranked node, updating centrality lazily
-    size_t q_reinsert = 0;
     while ( !q.empty() )
     {
         WeightedNode weighted = q.top(); q.pop();
@@ -388,17 +332,18 @@ TwoHopCover pick_propagate_prune(DiGraph &g)
         {
             weighted.weight = new_weight;
             q.push(weighted);
-            ++q_reinsert;
         }
         else
         {
             DEBUG("picked " << node << " with C=[" << (new_weight >> 32) << ", " << (new_weight & 0xffffffffu) << "]");
-            propagate_prune(g.forward, node, labels.out[node], labels.in);
-            propagate_prune(g.backward, node, labels.in[node], labels.out);
+            // use ascending labels so that label sets can simply be appended
+            const NodeID label = pick_order.size();
+            propagate_prune(g.forward, node, label, labels.out[node], labels.in);
+            propagate_prune(g.backward, node, label, labels.in[node], labels.out);
             g.remove_node(node);
+            pick_order.push_back(node);
         }
     }
-    cout << "PPP: " << q_reinsert << " queue re-insertions" << endl;
     return labels;
 }
 
@@ -443,6 +388,12 @@ Query random_query(size_t nodes)
     return Query(std::rand() % nodes, std::rand() % nodes);
 }
 
+// convert #labels into MB
+double l2mb(size_t labels)
+{
+    return labels * 4 / (1024.0 * 1024.0);
+}
+
 int main (int argc, char *argv[])
 {
     DiGraph g = argc > 1 ? read_graph_from_file(argv[1]) : read_graph(std::cin);
@@ -450,28 +401,30 @@ int main (int argc, char *argv[])
     if ( g.size() )
     {
         DEBUG("g=" << g);
+        vector<NodeID> pick_order;
+        pick_order.reserve(g.size());
         auto t_start = chrono::high_resolution_clock::now();
-        TwoHopCover cover = pick_propagate_prune(g);
+        TwoHopCover cover = pick_propagate_prune(g, pick_order);
         auto t_stop = chrono::high_resolution_clock::now();
         long dur_ms = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
-        DEBUG("cover=" << cover);
         // report stats
-        size_t labels = cover.labels();
+        cover.map(pick_order); // needed for identifying self-labels
+        DEBUG("cover=" << cover);
         size_t self_labels = cover.self_labels();
-        cout << "found 2-hop cover with " << labels - self_labels << " remote and " << self_labels << " self labels in " << static_cast<double>(dur_ms) / 1000.0 << "s" << endl;
+        size_t remote_labels = cover.labels() - self_labels;
+        cout << "found 2-hop cover with " << remote_labels << " remote and " << self_labels << " self labels in " << static_cast<double>(dur_ms) / 1000.0 << "s" << endl;
+        cout << "=> Index size = " << l2mb(remote_labels) << " + " << l2mb(self_labels) << " = " << l2mb(remote_labels + self_labels) << " MB" << endl;
         // test query speed
         vector<Query> queries;
-        for ( int i = 0; i < 1000000; ++i )
+        for ( size_t i = 0; i < query_count; ++i )
             queries.push_back(random_query(g.size()));
-        // fast updates are no longer needed, so switch to vector implementation
-        cover.vectorize();
         // time all three label storage variants
         t_start = chrono::high_resolution_clock::now();
         for ( Query q : queries )
             cover.can_reach_remote(q.from, q.to);
         t_stop = chrono::high_resolution_clock::now();
         long dur_remote = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
-        cout << "Processed 1M queries in " << dur_remote << "ms using remote-referenced self-labels" << endl;
+        cout << "Processed " << query_count << " queries in " << dur_remote << "ms using remote-referenced self-labels" << endl;
         // no self-labels
         cover.erase_self();
         t_start = chrono::high_resolution_clock::now();
@@ -479,7 +432,7 @@ int main (int argc, char *argv[])
             cover.can_reach_no_self(q.from, q.to);
         t_stop = chrono::high_resolution_clock::now();
         long dur_no_self = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
-        cout << "Processed 1M queries in " << dur_no_self << "ms using no self-labels" << endl;
+        cout << "Processed " << query_count << " queries in " << dur_no_self << "ms using no self-labels" << endl;
         // all self-labels
         cover.insert_self();
         t_start = chrono::high_resolution_clock::now();
@@ -487,34 +440,12 @@ int main (int argc, char *argv[])
             cover.can_reach_all_self(q.from, q.to);
         t_stop = chrono::high_resolution_clock::now();
         long dur_all_self = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
-        cout << "Processed 1M queries in " << dur_all_self << "ms using all self-labels" << endl;
+        cout << "Processed " << query_count << " queries in " << dur_all_self << "ms using all self-labels" << endl;
     }
     return 0;
 }
 
 // -------------------------- output functions --------------------------------
-
-template <typename T>
-std::ostream& operator<<(std::ostream& os, const std::vector<T> &v)
-{
-    os << "[";
-    for ( size_t i = 0; i < v.size(); i++ )
-    {
-        os << (i ? ", " : " ") << i << ": " << v[i];
-    }
-    return os << " ]";
-}
-
-template <typename T>
-std::ostream& operator<<(std::ostream& os, const std::set<T> &s)
-{
-    os << "{";
-    for ( T e : s )
-    {
-        os << " " << e;
-    }
-    return os << " }";
-}
 
 ostream& operator<<(ostream &os, const LazyList &l)
 {
@@ -524,14 +455,6 @@ ostream& operator<<(ostream &os, const LazyList &l)
 ostream& operator<<(ostream &os, const DiGraph &g)
 {
     return os << "DiGraph(\n\tforward=" << g.forward.neighbors << ",\n\tbackward=" << g.backward.neighbors << ",\n\tdeleted=" << g.deleted << "\n)";
-}
-
-ostream& operator<<(ostream &os, const LabelSet &l)
-{
-    if ( l.s )
-        return os << *l.s;
-    else
-        return os << static_cast<vector<NodeID>>(l.v);
 }
 
 ostream& operator<<(ostream &os, const TwoHopCover &c)
