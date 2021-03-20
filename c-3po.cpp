@@ -35,6 +35,9 @@ using namespace std;
 
 typedef uint32_t NodeID;
 
+static const uint32_t DEFAULT = UINT32_MAX;
+static const uint32_t DELETED = UINT32_MAX - 1;
+
 // vector of nodes with lazy deletion
 class LazyList: public vector<NodeID>
 {
@@ -59,14 +62,14 @@ public:
     }
 
     // remove deleted nodes
-    void prune(const vector<bool> &deleted)
+    void prune(const vector<uint32_t> &status)
     {
         if ( lazy_size < vector::size() )
         {
             auto it = begin();
             while ( it != end() )
             {
-                if ( deleted[*it] )
+                if ( status[*it] == DELETED )
                 {
                     *it = back();
                     pop_back();
@@ -91,10 +94,9 @@ class PartialGraph
 {
 public:
     vector<LazyList> neighbors;
-    const vector<bool> &deleted;
     vector<NodeID> &last_visited;
 
-    PartialGraph(const vector<bool> &deleted, vector<NodeID> &last_visited, size_t size) : neighbors(size), deleted(deleted), last_visited(last_visited) {}
+    PartialGraph(size_t size, vector<NodeID> &last_visited) : neighbors(size), last_visited(last_visited) {}
 };
 
 class DiGraph
@@ -102,11 +104,10 @@ class DiGraph
 public:
     PartialGraph forward;
     PartialGraph backward;
-    vector<bool> deleted;
-    // for tracking visited nodes during propagation
+    // for tracking deleted & visited nodes during propagation
     vector<NodeID> last_visited;
 
-    DiGraph(size_t size) : forward(deleted, last_visited, size), backward(deleted, last_visited, size), deleted(size), last_visited(size, UINT32_MAX) {}
+    DiGraph(size_t size) : forward(size, last_visited), backward(size, last_visited), last_visited(size, DEFAULT) {}
 
     void insert_edge(NodeID from, NodeID to)
     {
@@ -122,7 +123,7 @@ public:
             --forward.neighbors[neighbor];
         forward.neighbors[node].clear();
         backward.neighbors[node].clear();
-        deleted[node] = true;
+        last_visited[node] = DELETED;
     }
 
     uint64_t centrality(NodeID node)
@@ -138,7 +139,7 @@ public:
 
     size_t size()
     {
-        return deleted.size();
+        return last_visited.size();
     }
 };
 
@@ -298,7 +299,7 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
     vector<NodeID> stack;
     for ( NodeID neighbor : g.neighbors[node] )
         // will be removed after, so just check instead of pruning
-        if ( !g.deleted[neighbor] )
+        if ( g.last_visited[neighbor] != DELETED )
             stack.push_back(neighbor);
     while ( !stack.empty() )
     {
@@ -308,7 +309,7 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
             g.last_visited[next] = node;
             labels[next].push_back(label);
             // prune while we're here
-            g.neighbors[next].prune(g.deleted);
+            g.neighbors[next].prune(g.last_visited);
             for ( NodeID neighbor : g.neighbors[next] )
                 stack.push_back(neighbor);
         }
@@ -465,7 +466,7 @@ ostream& operator<<(ostream &os, const LazyList &l)
 
 ostream& operator<<(ostream &os, const DiGraph &g)
 {
-    return os << "DiGraph(\n\tforward=" << g.forward.neighbors << ",\n\tbackward=" << g.backward.neighbors << ",\n\tdeleted=" << g.deleted << "\n)";
+    return os << "DiGraph(\n\tforward=" << g.forward.neighbors << ",\n\tbackward=" << g.backward.neighbors << ",\n\tlast_visited=" << g.last_visited << "\n)";
 }
 
 ostream& operator<<(ostream &os, const TwoHopCover &c)
