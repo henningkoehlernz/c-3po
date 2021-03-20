@@ -14,6 +14,10 @@
 
 #define DEBUG(X) //cout << X << endl
 
+#define MIN_MAX_CENTRALITY
+#define UPDATE_CENTRALITY
+#define RANDOMIZE
+
 const size_t query_count = 1000000ul;
 
 template <typename T>
@@ -125,7 +129,11 @@ public:
     {
         uint64_t in = backward.neighbors[node].size();
         uint64_t out = forward.neighbors[node].size();
+#ifdef MIN_MAX_CENTRALITY
         return in <= out ? (in << 32) | out : (out << 32) | in;
+#else
+        return (in + 1) * (out + 1);
+#endif
     }
 
     size_t size()
@@ -141,23 +149,18 @@ class WeightedNode
 {
 public:
     uint64_t weight;
-    uint32_t encoded;
+    uint32_t node;
 
-    WeightedNode(uint64_t weight, uint32_t node) : weight(weight)
-    {
-        static const uint32_t mult = 2971215073u; // largest 32-bit Fibbonacci number
-        encoded = node * mult;
-    }
-
-    uint32_t node()
-    {
-        static const uint32_t inverse = 1051402017u; // multiplicative inverse modulo 2^32
-        return encoded * inverse;
-    }
+    WeightedNode(uint64_t weight, uint32_t node) : weight(weight), node(node) {}
 
     bool operator<(WeightedNode other) const
     {
-        return weight < other.weight || (weight == other.weight && encoded < other.encoded);
+#ifdef RANDOMIZE
+        // "randomized" by priority_queue implementation
+        return weight < other.weight;
+#else
+        return weight < other.weight || (weight == other.weight && node < other.node);
+#endif
     }
 };
 
@@ -326,7 +329,14 @@ TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order)
     while ( !q.empty() )
     {
         WeightedNode weighted = q.top(); q.pop();
-        NodeID node = weighted.node();
+        NodeID node = weighted.node;
+#ifndef UPDATE_CENTRALITY
+        const NodeID label = pick_order.size();
+        propagate_prune(g.forward, node, label, labels.out[node], labels.in);
+        propagate_prune(g.backward, node, label, labels.in[node], labels.out);
+        g.remove_node(node);
+        pick_order.push_back(node);
+#else
         uint64_t new_weight = g.centrality(node);
         if ( new_weight < weighted.weight )
         {
@@ -343,6 +353,7 @@ TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order)
             g.remove_node(node);
             pick_order.push_back(node);
         }
+#endif
     }
     return labels;
 }
