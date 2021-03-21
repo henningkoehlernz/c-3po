@@ -14,9 +14,11 @@
 
 #define DEBUG(X) //cout << X << endl
 
+// toggles for algorithmic features
 #define MIN_MAX_CENTRALITY
 #define UPDATE_CENTRALITY
 #define RANDOMIZE
+#define ESTIMATE_ANC_DESC
 
 const size_t query_count = 1000000ul;
 
@@ -62,7 +64,7 @@ public:
     }
 
     // remove deleted nodes
-    void prune(const vector<uint32_t> &status)
+    void cleanup(const vector<uint32_t> &status)
     {
         if ( lazy_size < vector::size() )
         {
@@ -99,6 +101,15 @@ public:
     PartialGraph(size_t size, vector<NodeID> &last_visited) : neighbors(size), last_visited(last_visited) {}
 };
 
+// estimate ancestors/descendants as degree + max(#ancestors/descendants of parents/children)
+struct Estimate
+{
+    NodeID max_neighbor;
+    uint32_t value;
+
+    Estimate(NodeID max_neighbor, uint32_t value) : max_neighbor(max_neighbor), value(value) {}
+};
+
 class DiGraph
 {
 public:
@@ -106,8 +117,19 @@ public:
     PartialGraph backward;
     // for tracking deleted & visited nodes during propagation
     vector<NodeID> last_visited;
+    // for estimating #ancestors and #descendants
+#ifdef ESTIMATE_ANC_DESC
+    vector<Estimate> anc_estimate; // parent with maximal #ancestors, total #ancestors
+    vector<Estimate> desc_estimate; // child with maximal #descendants, total #descendants
+#endif
 
-    DiGraph(size_t size) : forward(size, last_visited), backward(size, last_visited), last_visited(size, DEFAULT) {}
+    DiGraph(size_t size) : forward(size, last_visited), backward(size, last_visited), last_visited(size, DEFAULT) {
+#ifdef ESTIMATE_ANC_DESC
+        // add one gobal root (NodeID = size) that is never updated
+        anc_estimate.resize(size + 1, Estimate(size, 0));
+        desc_estimate.resize(size + 1, Estimate(size, 0));
+#endif
+    }
 
     void insert_edge(NodeID from, NodeID to)
     {
@@ -121,15 +143,22 @@ public:
             --backward.neighbors[neighbor];
         for ( NodeID neighbor : backward.neighbors[node] )
             --forward.neighbors[neighbor];
-        forward.neighbors[node].clear();
-        backward.neighbors[node].clear();
         last_visited[node] = DELETED;
+#ifdef ESTIMATE_ANC_DESC
+        anc_estimate[node].value = 0;
+        desc_estimate[node].value = 0;
+#endif
     }
 
     uint64_t centrality(NodeID node)
     {
+#ifdef ESTIMATE_ANC_DESC
+        uint64_t in = anc_estimate[node].value;
+        uint64_t out = desc_estimate[node].value;
+#else
         uint64_t in = backward.neighbors[node].size();
         uint64_t out = forward.neighbors[node].size();
+#endif
 #ifdef MIN_MAX_CENTRALITY
         return in <= out ? (in << 32) | out : (out << 32) | in;
 #else
@@ -141,6 +170,37 @@ public:
     {
         return last_visited.size();
     }
+
+#ifdef ESTIMATE_ANC_DESC
+    void estimate_anc_desc()
+    {
+        // requires nodes to be numbered in topological order
+        for ( NodeID node = 0; node < size(); ++node )
+        {
+            for ( NodeID parent : backward.neighbors[node] )
+            {
+                uint32_t anc = anc_estimate[parent].value;
+                if ( anc > anc_estimate[node].value )
+                    anc_estimate[node] = Estimate(parent, anc);
+            }
+            anc_estimate[node].value += backward.neighbors[node].size();
+        }
+        DEBUG("anc_estimate=" << anc_estimate);
+        // use while loop for reverse iteration to avoid underflow
+        NodeID node = size();
+        while ( node-- )
+        {
+            for ( NodeID child : forward.neighbors[node] )
+            {
+                uint32_t desc = desc_estimate[child].value;
+                if ( desc > desc_estimate[node].value )
+                    desc_estimate[node] = Estimate(child, desc);
+            }
+            desc_estimate[node].value += forward.neighbors[node].size();
+        }
+        DEBUG("desc_estimate=" << desc_estimate);
+    }
+#endif
 };
 
 ostream& operator<<(ostream &os, const DiGraph &g);
@@ -298,7 +358,7 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
     // propagate remote labels
     vector<NodeID> stack;
     for ( NodeID neighbor : g.neighbors[node] )
-        // will be removed after, so just check instead of pruning
+        // will be removed after, so just check instead of cleaning
         if ( g.last_visited[neighbor] != DELETED )
             stack.push_back(neighbor);
     while ( !stack.empty() )
@@ -308,8 +368,8 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
         {
             g.last_visited[next] = node;
             labels[next].push_back(label);
-            // prune while we're here
-            g.neighbors[next].prune(g.last_visited);
+            // cleanup while we're here
+            g.neighbors[next].cleanup(g.last_visited);
             for ( NodeID neighbor : g.neighbors[next] )
                 stack.push_back(neighbor);
         }
@@ -319,9 +379,38 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
         node_labels.push_back(label);
 }
 
+#ifdef ESTIMATE_ANC_DESC
+template<class TopCompare>
+void update_estimates(PartialGraph &g, const PartialGraph &rg, NodeID node, vector<Estimate> &estimates)
+{
+    priority_queue<NodeID, vector<NodeID>, TopCompare> q;
+    for ( NodeID neighbor : g.neighbors[node] )
+        if ( g.last_visited[neighbor] != DELETED )
+            q.push(neighbor);
+    while ( !q.empty() )
+    {
+        NodeID next = q.top(); q.pop();
+        uint32_t new_estimate = rg.neighbors[next].size() + estimates[estimates[next].max_neighbor].value;
+        // check if estimated value changed, as transitive edges can cause multiple visits
+        if ( new_estimate < estimates[next].value )
+        {
+            estimates[next].value = new_estimate;
+            // clean again - may not have been visited during label propagation due to label pruning
+            g.neighbors[next].cleanup(g.last_visited);
+            for ( NodeID neighbor : g.neighbors[next] )
+                if ( estimates[neighbor].max_neighbor == next )
+                    q.push(neighbor);
+        }
+    }
+}
+#endif
+
 TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order)
 {
     TwoHopCover labels(g.size());
+#ifdef ESTIMATE_ANC_DESC
+    g.estimate_anc_desc();
+#endif
     // order nodes by centrality
     priority_queue<WeightedNode> q;
     for ( NodeID node = 0; node < g.size(); ++node )
@@ -352,6 +441,10 @@ TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order)
             propagate_prune(g.forward, node, label, labels.out[node], labels.in);
             propagate_prune(g.backward, node, label, labels.in[node], labels.out);
             g.remove_node(node);
+#ifdef ESTIMATE_ANC_DESC
+            update_estimates<std::greater<NodeID>>(g.forward, g.backward, node, g.anc_estimate);
+            update_estimates<std::less<NodeID>>(g.backward, g.forward, node, g.desc_estimate);
+#endif
             pick_order.push_back(node);
         }
 #endif
@@ -378,7 +471,14 @@ DiGraph read_graph(std::istream &in)
             node_and_children.push_back(node);
         // construct graph
         for ( size_t child = 1; child < node_and_children.size(); ++child )
+        {
+            if ( node_and_children[0] >= node_and_children[child] )
+            {
+                cerr << "Error: nodes must be numbered in topological order (" << node_and_children[0] << " -> " << node_and_children[child] << ")" << endl;
+                exit(0);
+            }
             g.insert_edge(node_and_children[0], node_and_children[child]);
+        }
     }
     return g;
 }
@@ -462,6 +562,11 @@ int main (int argc, char *argv[])
 ostream& operator<<(ostream &os, const LazyList &l)
 {
     return os << l.size() << " of " << static_cast<vector<NodeID>>(l);
+}
+
+ostream& operator<<(ostream &os, const Estimate &e)
+{
+    return os << "Estimate(" << e.max_neighbor << ", " << e.value << ")";
 }
 
 ostream& operator<<(ostream &os, const DiGraph &g)
