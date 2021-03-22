@@ -87,6 +87,27 @@ public:
         vector::clear();
         lazy_size = 0;
     }
+
+    // erase non-deleted nodes given as sorted vector
+    size_t erase_all(const vector<NodeID> &sorted)
+    {
+        size_t erased = 0;
+        auto it = begin();
+        while ( it != end() )
+        {
+            if ( binary_search(sorted.cbegin(), sorted.cend(), *it) )
+            {
+                *it = back();
+                pop_back();
+                ++erased;
+            }
+            else
+                ++it;
+        }
+        lazy_size -= erased;
+        return erased;
+    }
+
 };
 
 ostream& operator<<(ostream &os, const LazyList &l);
@@ -184,21 +205,30 @@ public:
                     anc_estimate[node] = Estimate(parent, anc);
             }
             anc_estimate[node].value += backward.neighbors[node].size();
-        }
-        DEBUG("anc_estimate=" << anc_estimate);
-        // use while loop for reverse iteration to avoid underflow
-        NodeID node = size();
-        while ( node-- )
-        {
-            for ( NodeID child : forward.neighbors[node] )
+            // compute descendants estimates in reverse order
+            NodeID rev = size() - node - 1;
+            for ( NodeID child : forward.neighbors[rev] )
             {
                 uint32_t desc = desc_estimate[child].value;
-                if ( desc > desc_estimate[node].value )
-                    desc_estimate[node] = Estimate(child, desc);
+                if ( desc > desc_estimate[rev].value )
+                    desc_estimate[rev] = Estimate(child, desc);
             }
-            desc_estimate[node].value += forward.neighbors[node].size();
+            desc_estimate[rev].value += forward.neighbors[rev].size();
         }
+        DEBUG("anc_estimate=" << anc_estimate);
         DEBUG("desc_estimate=" << desc_estimate);
+    }
+
+    void reestimate()
+    {
+        for ( NodeID node = 0; node < size(); ++node )
+        {
+            NodeID rev = size() - node - 1;
+            anc_estimate[node].value = backward.neighbors[node].size() + anc_estimate[anc_estimate[node].max_neighbor].value;
+            desc_estimate[rev].value = forward.neighbors[rev].size() + desc_estimate[desc_estimate[rev].max_neighbor].value;
+        }
+        DEBUG("anc_reestimate=" << anc_estimate);
+        DEBUG("desc_reestimate=" << desc_estimate);
     }
 #endif
 };
@@ -445,6 +475,34 @@ vector<pair<NodeID,NodeID>> get_tree_transitive(const PartialGraph &g, const vec
 }
 
 #ifdef ESTIMATE_ANC_DESC
+void remove_tree_transitive(DiGraph &g)
+{
+    vector<pair<uint32_t,uint32_t>> anc_index = index2D(g.forward, g.anc_estimate);
+    vector<pair<uint32_t,uint32_t>> desc_index = index2D(g.backward, g.desc_estimate);
+    // organize transitive edges by node for effient bulk removal
+    vector<vector<NodeID>> transitive(g.size());
+    for ( pair<NodeID,NodeID> edge : get_tree_transitive(g.forward, anc_index) )
+    {
+        transitive[edge.first].push_back(edge.second);
+        transitive[edge.second].push_back(edge.first);
+        DEBUG("found forward t-edge " << edge.first << " -> " << edge.second);
+    }
+    for ( pair<NodeID,NodeID> edge : get_tree_transitive(g.backward, desc_index) )
+    {
+        transitive[edge.first].push_back(edge.second);
+        transitive[edge.second].push_back(edge.first);
+        DEBUG("found backward t-edge " << edge.first << " -> " << edge.second);
+    }
+    // remove transitive neighbors
+    for ( NodeID node = 0; node < g.size(); node++ )
+    {
+        vector<NodeID> &t = transitive[node];
+        sort(t.begin(), t.end());
+        g.forward.neighbors[node].erase_all(t);
+        g.backward.neighbors[node].erase_all(t);
+    }
+}
+
 template<class TopCompare>
 void update_estimates(PartialGraph &g, const PartialGraph &rg, NodeID node, vector<Estimate> &estimates)
 {
@@ -475,6 +533,8 @@ TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order)
     TwoHopCover labels(g.size());
 #ifdef ESTIMATE_ANC_DESC
     g.estimate_anc_desc();
+    remove_tree_transitive(g);
+    g.reestimate();
 #endif
     // order nodes by centrality
     priority_queue<WeightedNode> q;
