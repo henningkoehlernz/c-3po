@@ -410,8 +410,39 @@ vector<pair<uint32_t,uint32_t>> index2D(const PartialGraph &g, const vector<Esti
     return index;
 }
 
-// remove transitive edges that cause double-counting for anc/desc estimates
-
+// find transitive edges that cause double-counting for anc/desc estimates
+vector<pair<NodeID,NodeID>> get_tree_transitive(const PartialGraph &g, const vector<pair<uint32_t,uint32_t>> &index)
+{
+    struct IndexedNode
+    {
+        pair<uint32_t,uint32_t> label2D;
+        NodeID node;
+        IndexedNode(pair<uint32_t,uint32_t> label2D, NodeID node) : label2D(label2D), node(node) {}
+        bool operator<(const IndexedNode &other) const { return label2D.first < other.label2D.first; }
+    };
+    vector<IndexedNode> indexed_neighbors;
+    // compare neighbors of each node w.r.t. tree-reachability
+    vector<pair<NodeID,NodeID>> edges;
+    const size_t V = g.neighbors.size();
+    for ( NodeID node = 0; node < V; ++node )
+    {
+        if ( g.neighbors[node].size() > 1 )
+        {
+            for ( NodeID neighbor : g.neighbors[node] )
+                indexed_neighbors.push_back(IndexedNode(index[neighbor], neighbor));
+            sort(indexed_neighbors.begin(), indexed_neighbors.end());
+            uint32_t min_second = indexed_neighbors[0].label2D.second;
+            for ( size_t i = 1; i < indexed_neighbors.size(); ++i )
+                // sorted by first label => only need to compare second
+                if ( min_second < indexed_neighbors[i].label2D.second )
+                    edges.push_back(make_pair(node, indexed_neighbors[i].node));
+                else
+                    min_second = indexed_neighbors[i].label2D.second;
+            indexed_neighbors.clear();
+        }
+    }
+    return edges;
+}
 
 #ifdef ESTIMATE_ANC_DESC
 template<class TopCompare>
