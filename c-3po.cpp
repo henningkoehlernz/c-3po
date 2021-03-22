@@ -379,6 +379,40 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
         node_labels.push_back(label);
 }
 
+// construct 2D-index for estimate tree
+vector<pair<uint32_t,uint32_t>> index2D(const PartialGraph &g, const vector<Estimate> &tree)
+{
+    const size_t V = g.neighbors.size();
+    vector<pair<uint32_t,uint32_t>> index(V);
+    vector<NodeID> stack;
+    for ( NodeID node = 0; node < V; ++node )
+        if ( tree[node].max_neighbor == V ) // no parent except universal root
+            stack.push_back(node);
+    uint32_t c_first = 1, c_second = V;
+    while ( !stack.empty() )
+    {
+        NodeID node = stack.back();
+        // are we back-tracking?
+        if ( index[node].first )
+        {
+            index[node].second = c_second--;
+            stack.pop_back();
+        }
+        else
+        {
+            index[node].first = c_first++;
+            for ( NodeID child : g.neighbors[node] )
+                // check if child in tree, not just in g
+                if ( tree[child].max_neighbor == node )
+                    stack.push_back(child);
+        }
+    }
+    return index;
+}
+
+// remove transitive edges that cause double-counting for anc/desc estimates
+
+
 #ifdef ESTIMATE_ANC_DESC
 template<class TopCompare>
 void update_estimates(PartialGraph &g, const PartialGraph &rg, NodeID node, vector<Estimate> &estimates)
