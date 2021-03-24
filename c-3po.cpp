@@ -40,8 +40,18 @@ typedef uint32_t NodeID;
 static const uint32_t DEFAULT = UINT32_MAX;
 static const uint32_t DELETED = UINT32_MAX - 1;
 
+struct Neighbor
+{
+    NodeID node;
+#ifdef ESTIMATE_ANC_DESC
+    uint32_t estimate;
+    bool operator<(Neighbor other) { return estimate < other.estimate; }
+#endif
+    Neighbor(NodeID node) : node(node) {}
+};
+
 // vector of nodes with lazy deletion
-class LazyList: public vector<NodeID>
+class LazyList: public vector<Neighbor>
 {
     size_type lazy_size = 0; // track actual data size
 public:
@@ -51,7 +61,7 @@ public:
         return lazy_size;
     }
 
-    void push_back(const NodeID &val) // override (non-virtual)
+    void push_back(NodeID val) // override (non-virtual)
     {
         vector::push_back(val);
         ++lazy_size;
@@ -63,22 +73,25 @@ public:
         --lazy_size;
     }
 
-    // remove deleted nodes
-    void cleanup(const vector<uint32_t> &status)
+    // remove deleted nodes while preserving node order (call before iterating over nodes => no complexity increase)
+    void shrink(const vector<uint32_t> &status, size_t start = 0)
     {
         if ( lazy_size < vector::size() )
         {
-            auto it = begin();
+            auto it = begin() + start;
+            // find first deleted node - must exist
+            while ( status[it->node] != DELETED )
+                ++it;
+            // shift non-deleted nodes into next free space
+            auto next_free = it++;
             while ( it != end() )
             {
-                if ( status[*it] == DELETED )
-                {
-                    *it = back();
-                    pop_back();
-                }
-                else
+                if ( status[it->node] == DELETED )
                     ++it;
+                else
+                    *(next_free++) = *(it++);
             }
+            resize(lazy_size, 0);
         }
     }
 
@@ -95,7 +108,7 @@ public:
         auto it = begin();
         while ( it != end() )
         {
-            if ( binary_search(sorted.cbegin(), sorted.cend(), *it) )
+            if ( binary_search(sorted.cbegin(), sorted.cend(), it->node) )
             {
                 *it = back();
                 pop_back();
@@ -120,15 +133,7 @@ public:
     vector<NodeID> &last_visited;
 
     PartialGraph(size_t size, vector<NodeID> &last_visited) : neighbors(size), last_visited(last_visited) {}
-};
-
-// estimate ancestors/descendants as degree + max(#ancestors/descendants of parents/children)
-struct Estimate
-{
-    NodeID max_neighbor;
-    uint32_t value;
-
-    Estimate(NodeID max_neighbor, uint32_t value) : max_neighbor(max_neighbor), value(value) {}
+    bool deleted(NodeID node) const { return last_visited[node] == DELETED; }
 };
 
 class DiGraph
@@ -138,17 +143,15 @@ public:
     PartialGraph backward;
     // for tracking deleted & visited nodes during propagation
     vector<NodeID> last_visited;
-    // for estimating #ancestors and #descendants
 #ifdef ESTIMATE_ANC_DESC
-    vector<Estimate> anc_estimate; // parent with maximal #ancestors, total #ancestors
-    vector<Estimate> desc_estimate; // child with maximal #descendants, total #descendants
+    vector<uint32_t> anc_estimate; // total #ancestors
+    vector<uint32_t> desc_estimate; // total #descendants
 #endif
 
     DiGraph(size_t size) : forward(size, last_visited), backward(size, last_visited), last_visited(size, DEFAULT) {
 #ifdef ESTIMATE_ANC_DESC
-        // add one gobal root (NodeID = size) that is never updated
-        anc_estimate.resize(size + 1, Estimate(size, 0));
-        desc_estimate.resize(size + 1, Estimate(size, 0));
+        anc_estimate.resize(size, 0);
+        desc_estimate.resize(size, 0);
 #endif
     }
 
@@ -160,22 +163,18 @@ public:
 
     void remove_node(NodeID node)
     {
-        for ( NodeID neighbor : forward.neighbors[node] )
-            --backward.neighbors[neighbor];
-        for ( NodeID neighbor : backward.neighbors[node] )
-            --forward.neighbors[neighbor];
+        for ( Neighbor neighbor : forward.neighbors[node] )
+            --backward.neighbors[neighbor.node];
+        for ( Neighbor neighbor : backward.neighbors[node] )
+            --forward.neighbors[neighbor.node];
         last_visited[node] = DELETED;
-#ifdef ESTIMATE_ANC_DESC
-        anc_estimate[node].value = 0;
-        desc_estimate[node].value = 0;
-#endif
     }
 
     uint64_t centrality(NodeID node)
     {
 #ifdef ESTIMATE_ANC_DESC
-        uint64_t in = anc_estimate[node].value;
-        uint64_t out = desc_estimate[node].value;
+        uint64_t in = anc_estimate[node];
+        uint64_t out = desc_estimate[node];
 #else
         uint64_t in = backward.neighbors[node].size();
         uint64_t out = forward.neighbors[node].size();
@@ -198,37 +197,27 @@ public:
         // requires nodes to be numbered in topological order
         for ( NodeID node = 0; node < size(); ++node )
         {
-            for ( NodeID parent : backward.neighbors[node] )
+            LazyList &parents = backward.neighbors[node];
+            if ( parents.size() > 0 )
             {
-                uint32_t anc = anc_estimate[parent].value;
-                if ( anc > anc_estimate[node].value )
-                    anc_estimate[node] = Estimate(parent, anc);
+                for ( Neighbor &parent : parents )
+                    parent.estimate = anc_estimate[parent.node];
+                sort(parents.begin(), parents.end());
+                anc_estimate[node] = parents.size() + parents.back().estimate;
             }
-            anc_estimate[node].value += backward.neighbors[node].size();
             // compute descendants estimates in reverse order
             NodeID rev = size() - node - 1;
-            for ( NodeID child : forward.neighbors[rev] )
+            LazyList &children = forward.neighbors[rev];
+            if ( children.size() > 0 )
             {
-                uint32_t desc = desc_estimate[child].value;
-                if ( desc > desc_estimate[rev].value )
-                    desc_estimate[rev] = Estimate(child, desc);
+                for ( Neighbor &child : children )
+                    child.estimate = desc_estimate[child.node];
+                sort(children.begin(), children.end());
+                desc_estimate[rev] = children.size() + children.back().estimate;
             }
-            desc_estimate[rev].value += forward.neighbors[rev].size();
         }
         DEBUG("anc_estimate=" << anc_estimate);
         DEBUG("desc_estimate=" << desc_estimate);
-    }
-
-    void reestimate()
-    {
-        for ( NodeID node = 0; node < size(); ++node )
-        {
-            NodeID rev = size() - node - 1;
-            anc_estimate[node].value = backward.neighbors[node].size() + anc_estimate[anc_estimate[node].max_neighbor].value;
-            desc_estimate[rev].value = forward.neighbors[rev].size() + desc_estimate[desc_estimate[rev].max_neighbor].value;
-        }
-        DEBUG("anc_reestimate=" << anc_estimate);
-        DEBUG("desc_reestimate=" << desc_estimate);
     }
 #endif
 };
@@ -387,10 +376,9 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
 {
     // propagate remote labels
     vector<NodeID> stack;
-    for ( NodeID neighbor : g.neighbors[node] )
-        // will be removed after, so just check instead of cleaning
-        if ( g.last_visited[neighbor] != DELETED )
-            stack.push_back(neighbor);
+    g.neighbors[node].shrink(g.last_visited);
+    for ( Neighbor neighbor : g.neighbors[node] )
+        stack.push_back(neighbor.node);
     while ( !stack.empty() )
     {
         NodeID next = stack.back(); stack.pop_back();
@@ -398,10 +386,9 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
         {
             g.last_visited[next] = node;
             labels[next].push_back(label);
-            // cleanup while we're here
-            g.neighbors[next].cleanup(g.last_visited);
-            for ( NodeID neighbor : g.neighbors[next] )
-                stack.push_back(neighbor);
+            g.neighbors[next].shrink(g.last_visited);
+            for ( Neighbor neighbor : g.neighbors[next] )
+                stack.push_back(neighbor.node);
         }
     }
     // insert self label
@@ -410,13 +397,13 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
 }
 
 // construct 2D-index for estimate tree
-vector<pair<uint32_t,uint32_t>> index2D(const PartialGraph &g, const vector<Estimate> &tree)
+vector<pair<uint32_t,uint32_t>> index2D(const PartialGraph &g, const PartialGraph &rg)
 {
     const size_t V = g.neighbors.size();
     vector<pair<uint32_t,uint32_t>> index(V);
     vector<NodeID> stack;
     for ( NodeID node = 0; node < V; ++node )
-        if ( tree[node].max_neighbor == V ) // no parent except universal root
+        if ( g.neighbors[node].size() == 0 )
             stack.push_back(node);
     uint32_t c_first = 1, c_second = V;
     while ( !stack.empty() )
@@ -431,10 +418,13 @@ vector<pair<uint32_t,uint32_t>> index2D(const PartialGraph &g, const vector<Esti
         else
         {
             index[node].first = c_first++;
-            for ( NodeID child : g.neighbors[node] )
+            for ( Neighbor child : g.neighbors[node] )
+            {
+                const LazyList &rn = rg.neighbors[child.node];
                 // check if child in tree, not just in g
-                if ( tree[child].max_neighbor == node )
-                    stack.push_back(child);
+                if ( rn.size() && rn.back().node == node )
+                    stack.push_back(child.node);
+            }
         }
     }
     return index;
@@ -458,8 +448,8 @@ vector<pair<NodeID,NodeID>> get_tree_transitive(const PartialGraph &g, const vec
     {
         if ( g.neighbors[node].size() > 1 )
         {
-            for ( NodeID neighbor : g.neighbors[node] )
-                indexed_neighbors.push_back(IndexedNode(index[neighbor], neighbor));
+            for ( Neighbor neighbor : g.neighbors[node] )
+                indexed_neighbors.push_back(IndexedNode(index[neighbor.node], neighbor.node));
             sort(indexed_neighbors.begin(), indexed_neighbors.end());
             uint32_t min_second = indexed_neighbors[0].label2D.second;
             for ( size_t i = 1; i < indexed_neighbors.size(); ++i )
@@ -477,8 +467,8 @@ vector<pair<NodeID,NodeID>> get_tree_transitive(const PartialGraph &g, const vec
 #ifdef ESTIMATE_ANC_DESC
 void remove_tree_transitive(DiGraph &g)
 {
-    vector<pair<uint32_t,uint32_t>> anc_index = index2D(g.forward, g.anc_estimate);
-    vector<pair<uint32_t,uint32_t>> desc_index = index2D(g.backward, g.desc_estimate);
+    vector<pair<uint32_t,uint32_t>> anc_index = index2D(g.forward, g.backward);
+    vector<pair<uint32_t,uint32_t>> desc_index = index2D(g.backward, g.forward);
     // organize transitive edges by node for effient bulk removal
     vector<vector<NodeID>> transitive(g.size());
     for ( pair<NodeID,NodeID> edge : get_tree_transitive(g.forward, anc_index) )
@@ -504,25 +494,58 @@ void remove_tree_transitive(DiGraph &g)
 }
 
 template<class TopCompare>
-void update_estimates(PartialGraph &g, const PartialGraph &rg, NodeID node, vector<Estimate> &estimates)
+void update_estimates(PartialGraph &g, PartialGraph &rg, NodeID node, vector<uint32_t> &estimates)
 {
     priority_queue<NodeID, vector<NodeID>, TopCompare> q;
-    for ( NodeID neighbor : g.neighbors[node] )
-        if ( g.last_visited[neighbor] != DELETED )
-            q.push(neighbor);
+    for ( Neighbor neighbor : g.neighbors[node] )
+        q.push(neighbor.node);
     while ( !q.empty() )
     {
         NodeID next = q.top(); q.pop();
-        uint32_t new_estimate = rg.neighbors[next].size() + estimates[estimates[next].max_neighbor].value;
-        // check if estimated value changed, as transitive edges can cause multiple visits
-        if ( new_estimate < estimates[next].value )
+        LazyList &rn = rg.neighbors[next];
+        uint32_t new_estimate = 0;
+        if ( rn.size() )
         {
-            estimates[next].value = new_estimate;
-            // clean again - may not have been visited during label propagation due to label pruning
-            g.neighbors[next].cleanup(g.last_visited);
-            for ( NodeID neighbor : g.neighbors[next] )
-                if ( estimates[neighbor].max_neighbor == next )
-                    q.push(neighbor);
+            // update estimates for neighbors and re-sort as much as needed
+            vector<Neighbor> updated;
+            uint32_t min_ne = UINT32_MAX; // minimal neighbor estimate seen so far
+            size_t pos = rn.vector::size();
+            size_t shrink_from = DEFAULT;
+            while ( pos > 0 )
+            {
+                if ( g.deleted(rn[--pos].node) )
+                {
+                    shrink_from = pos;
+                    continue;
+                }
+                // update estimates until all preceeding neighbors must have smaller estimates
+                uint32_t ne = estimates[rn[pos].node];
+                if ( ne < rn[pos].estimate )
+                {
+                    rn[pos].estimate = ne;
+                    if ( ne < min_ne )
+                        min_ne = ne;
+                }
+                else if ( ne <= min_ne )
+                {
+                    // all preceeding neighbors must have smaller estimates as well
+                    break;
+                }
+            }
+            if ( shrink_from != DEFAULT )
+                rn.shrink(g.last_visited, shrink_from);
+            sort(rn.begin() + pos, rn.end());
+            // ready to re-estimate
+            new_estimate = rn.size() + rn.back().estimate;
+        }
+        // check if estimated value changed, as transitive edges can cause multiple visits
+        if ( new_estimate < estimates[next] )
+        {
+            estimates[next] = new_estimate;
+            // shrink again - may not have been visited during label propagation due to label pruning
+            g.neighbors[next].shrink(g.last_visited);
+            for ( Neighbor neighbor : g.neighbors[next] )
+                q.push(neighbor.node);
         }
     }
 }
@@ -533,8 +556,8 @@ TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order)
     TwoHopCover labels(g.size());
 #ifdef ESTIMATE_ANC_DESC
     g.estimate_anc_desc();
-    remove_tree_transitive(g);
-    g.reestimate();
+    //remove_tree_transitive(g);
+    //g.estimate_anc_desc();
 #endif
     // order nodes by centrality
     priority_queue<WeightedNode> q;
@@ -684,14 +707,18 @@ int main (int argc, char *argv[])
 
 // -------------------------- output functions --------------------------------
 
-ostream& operator<<(ostream &os, const LazyList &l)
+ostream& operator<<(ostream &os, const Neighbor &n)
 {
-    return os << l.size() << " of " << static_cast<vector<NodeID>>(l);
+#ifdef ESTIMATE_ANC_DESC
+    return os << "N(" << n.node << ", " << n.estimate << ")";
+#else
+    return os << n.node;
+#endif
 }
 
-ostream& operator<<(ostream &os, const Estimate &e)
+ostream& operator<<(ostream &os, const LazyList &l)
 {
-    return os << "Estimate(" << e.max_neighbor << ", " << e.value << ")";
+    return os << l.size() << " of " << static_cast<vector<Neighbor>>(l);
 }
 
 ostream& operator<<(ostream &os, const DiGraph &g)
