@@ -82,16 +82,20 @@ public:
             // find first deleted node - must exist
             while ( status[it->node] != DELETED )
                 ++it;
+            size_t deleted = 1;
             // shift non-deleted nodes into next free space
             auto next_free = it++;
             while ( it != end() )
             {
                 if ( status[it->node] == DELETED )
+                {
                     ++it;
+                    ++deleted;
+                }
                 else
                     *(next_free++) = *(it++);
             }
-            resize(lazy_size, 0);
+            resize(vector::size() - deleted, 0);
         }
     }
 
