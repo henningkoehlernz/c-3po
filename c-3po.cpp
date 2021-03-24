@@ -33,6 +33,12 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T> &v)
     return os << " ]";
 }
 
+template <typename T1, typename T2>
+std::ostream& operator<<(std::ostream& os, const std::pair<T1,T2> &p)
+{
+    return os << "(" << p.first << ", " << p.second << ")";
+}
+
 using namespace std;
 
 typedef uint32_t NodeID;
@@ -407,8 +413,9 @@ vector<pair<uint32_t,uint32_t>> index2D(const PartialGraph &g, const PartialGrap
     vector<pair<uint32_t,uint32_t>> index(V);
     vector<NodeID> stack;
     for ( NodeID node = 0; node < V; ++node )
-        if ( g.neighbors[node].size() == 0 )
+        if ( rg.neighbors[node].size() == 0 )
             stack.push_back(node);
+    DEBUG("index2D: stack=" << stack);
     uint32_t c_first = 1, c_second = V;
     while ( !stack.empty() )
     {
@@ -426,7 +433,7 @@ vector<pair<uint32_t,uint32_t>> index2D(const PartialGraph &g, const PartialGrap
             {
                 const LazyList &rn = rg.neighbors[child.node];
                 // check if child in tree, not just in g
-                if ( rn.size() && rn.back().node == node )
+                if ( rn.back().node == node )
                     stack.push_back(child.node);
             }
         }
@@ -469,10 +476,13 @@ vector<pair<NodeID,NodeID>> get_tree_transitive(const PartialGraph &g, const vec
 }
 
 #ifdef ESTIMATE_ANC_DESC
-void remove_tree_transitive(DiGraph &g)
+size_t remove_tree_transitive(DiGraph &g)
 {
+    DEBUG("g=" << g);
     vector<pair<uint32_t,uint32_t>> anc_index = index2D(g.forward, g.backward);
     vector<pair<uint32_t,uint32_t>> desc_index = index2D(g.backward, g.forward);
+    DEBUG("anc_index=" << anc_index);
+    DEBUG("desc_index=" << desc_index);
     // organize transitive edges by node for effient bulk removal
     vector<vector<NodeID>> transitive(g.size());
     for ( pair<NodeID,NodeID> edge : get_tree_transitive(g.forward, anc_index) )
@@ -488,13 +498,15 @@ void remove_tree_transitive(DiGraph &g)
         DEBUG("found backward t-edge " << edge.first << " -> " << edge.second);
     }
     // remove transitive neighbors
+    size_t erased = 0;
     for ( NodeID node = 0; node < g.size(); node++ )
     {
         vector<NodeID> &t = transitive[node];
         sort(t.begin(), t.end());
-        g.forward.neighbors[node].erase_all(t);
-        g.backward.neighbors[node].erase_all(t);
+        erased += g.forward.neighbors[node].erase_all(t);
+        erased += g.backward.neighbors[node].erase_all(t);
     }
+    return erased / 2;
 }
 
 template<class TopCompare>
@@ -560,8 +572,8 @@ TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order)
     TwoHopCover labels(g.size());
 #ifdef ESTIMATE_ANC_DESC
     g.estimate_anc_desc();
-    //remove_tree_transitive(g);
-    //g.estimate_anc_desc();
+    cout << "removed " << remove_tree_transitive(g) << " transitive edges" << endl;
+    g.estimate_anc_desc();
 #endif
     // order nodes by centrality
     priority_queue<WeightedNode> q;
@@ -727,7 +739,7 @@ ostream& operator<<(ostream &os, const LazyList &l)
 
 ostream& operator<<(ostream &os, const DiGraph &g)
 {
-    return os << "DiGraph(\n\tforward=" << g.forward.neighbors << ",\n\tbackward=" << g.backward.neighbors << ",\n\tlast_visited=" << g.last_visited << "\n)";
+    return os << "DiGraph(\n\tforward=" << g.forward.neighbors << ",\n\tbackward=" << g.backward.neighbors << "\n)";
 }
 
 ostream& operator<<(ostream &os, const TwoHopCover &c)
