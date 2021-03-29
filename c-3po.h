@@ -15,8 +15,6 @@
 #define RANDOMIZE
 #define ESTIMATE_ANC_DESC
 
-using namespace std;
-
 typedef uint32_t NodeID;
 
 static const uint32_t DEFAULT = UINT32_MAX;
@@ -33,7 +31,7 @@ struct Neighbor
 };
 
 // vector of nodes with lazy deletion
-class LazyList: public vector<Neighbor>
+class LazyList: public std::vector<Neighbor>
 {
     size_type lazy_size = 0; // track actual data size
 public:
@@ -42,20 +40,20 @@ public:
     // notify of size reduction
     void operator--();
     // remove deleted nodes while preserving node order (call before iterating over nodes => no complexity increase)
-    void shrink(const vector<uint32_t> &status, size_t start = 0);
+    void shrink(const std::vector<uint32_t> &status, size_t start = 0);
     void clear();
     // erase non-deleted nodes given as sorted vector
-    size_t erase_all(const vector<NodeID> &sorted);
+    size_t erase_all(const std::vector<NodeID> &sorted);
 };
 
 // one-directional graph
 class PartialGraph
 {
 public:
-    vector<LazyList> neighbors;
-    vector<NodeID> &last_visited;
+    std::vector<LazyList> neighbors;
+    std::vector<NodeID> &last_visited;
 
-    PartialGraph(size_t size, vector<NodeID> &last_visited);
+    PartialGraph(size_t size, std::vector<NodeID> &last_visited);
     bool deleted(NodeID node) const;
 };
 
@@ -65,10 +63,10 @@ public:
     PartialGraph forward;
     PartialGraph backward;
     // for tracking deleted & visited nodes during propagation
-    vector<NodeID> last_visited;
+    std::vector<NodeID> last_visited;
 #ifdef ESTIMATE_ANC_DESC
-    vector<uint32_t> anc_estimate; // total #ancestors
-    vector<uint32_t> desc_estimate; // total #descendants
+    std::vector<uint32_t> anc_estimate; // total #ancestors
+    std::vector<uint32_t> desc_estimate; // total #descendants
 #endif
 
     DiGraph(size_t size);
@@ -81,18 +79,18 @@ public:
 #endif
 };
 
-typedef vector<NodeID> LabelSet;
+typedef std::vector<NodeID> LabelSet;
 
 class TwoHopCover
 {
 public:
-    vector<LabelSet> in;
-    vector<LabelSet> out;
+    std::vector<LabelSet> in;
+    std::vector<LabelSet> out;
 
     TwoHopCover(size_t nodes);
     size_t labels() const;
     size_t self_labels() const;
-    void map(vector<NodeID> f);
+    void map(std::vector<NodeID> f);
     // functions for reachability testing
     void erase_self();
     void insert_self();
@@ -101,7 +99,7 @@ public:
     bool can_reach_no_self(NodeID from, NodeID to) const;
 };
 
-TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order);
+TwoHopCover pick_propagate_prune(DiGraph &g, std::vector<NodeID> &pick_order);
 DiGraph read_graph(std::istream &in);
 DiGraph read_graph_from_file(char* filename);
 
@@ -124,7 +122,7 @@ std::ostream& operator<<(std::ostream& os, const std::pair<T1,T2> &p)
     return os << "(" << p.first << ", " << p.second << ")";
 }
 
-ostream& operator<<(ostream &os, const Neighbor &n);
-ostream& operator<<(ostream &os, const LazyList &l);
-ostream& operator<<(ostream &os, const DiGraph &g);
-ostream& operator<<(ostream &os, const TwoHopCover &c);
+std::ostream& operator<<(std::ostream &os, const Neighbor &n);
+std::ostream& operator<<(std::ostream &os, const LazyList &l);
+std::ostream& operator<<(std::ostream &os, const DiGraph &g);
+std::ostream& operator<<(std::ostream &os, const TwoHopCover &c);

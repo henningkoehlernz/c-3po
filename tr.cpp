@@ -1,5 +1,7 @@
 #include "tr.h"
 
+using namespace std;
+
 void get_po_tree(const DiGraph &g, vector<vector<NodeID>> &po_tree, vector<NodeID> &parents)
 {
     const size_t V = g.size();

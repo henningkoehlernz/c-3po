@@ -6,6 +6,8 @@
 #include "c-3po.h"
 #include "tr.h"
 
+using namespace std;
+
 const size_t query_count = 1000000ul;
 
 struct Query
