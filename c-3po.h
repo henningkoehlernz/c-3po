@@ -2,8 +2,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cstdint>
-#include <cstdlib>
 #include <iostream>
 #include <vector>
 
@@ -51,25 +49,27 @@ class PartialGraph
 {
 public:
     std::vector<LazyList> neighbors;
-    std::vector<NodeID> &last_visited;
+    std::vector<NodeID> *last_visited;
 
-    PartialGraph(size_t size, std::vector<NodeID> &last_visited);
+    PartialGraph(size_t size, std::vector<NodeID> *last_visited);
+    PartialGraph(const PartialGraph &g);
     bool deleted(NodeID node) const;
 };
 
 class DiGraph
 {
+    // for tracking deleted & visited nodes during propagation
+    std::vector<NodeID> last_visited;
 public:
     PartialGraph forward;
     PartialGraph backward;
-    // for tracking deleted & visited nodes during propagation
-    std::vector<NodeID> last_visited;
 #ifdef ESTIMATE_ANC_DESC
     std::vector<uint32_t> anc_estimate; // total #ancestors
     std::vector<uint32_t> desc_estimate; // total #descendants
 #endif
 
     DiGraph(size_t size);
+    DiGraph(const DiGraph &g);
     void insert_edge(NodeID from, NodeID to);
     void remove_node(NodeID node);
     uint64_t centrality(NodeID node) const;

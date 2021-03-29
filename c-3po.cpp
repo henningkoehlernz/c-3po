@@ -92,19 +92,32 @@ size_t LazyList::erase_all(const vector<NodeID> &sorted)
 
 //------------------------- PartialGraph ----------------------------
 
-PartialGraph::PartialGraph(size_t size, vector<NodeID> &last_visited) : neighbors(size), last_visited(last_visited) {}
+PartialGraph::PartialGraph(size_t size, vector<NodeID> *last_visited) : neighbors(size), last_visited(last_visited) {}
+
+PartialGraph::PartialGraph(const PartialGraph &g) : neighbors(g.neighbors), last_visited(nullptr) {}
 
 bool PartialGraph::deleted(NodeID node) const {
-    return last_visited[node] == DELETED;
+    return (*last_visited)[node] == DELETED;
 }
 
 //------------------------- DiGraph ---------------------------------
 
-DiGraph::DiGraph(size_t size) : forward(size, last_visited), backward(size, last_visited), last_visited(size, DEFAULT) {
+DiGraph::DiGraph(size_t size) : last_visited(size, DEFAULT), forward(size, &last_visited), backward(size, &last_visited) {
 #ifdef ESTIMATE_ANC_DESC
     anc_estimate.resize(size, 0);
     desc_estimate.resize(size, 0);
 #endif
+}
+
+DiGraph::DiGraph(const DiGraph &g) : last_visited(g.last_visited), forward(g.forward), backward(g.backward)
+{
+#ifdef ESTIMATE_ANC_DESC
+    anc_estimate = g.anc_estimate;
+    desc_estimate = g.desc_estimate;
+#endif
+    // fix last_visited pointers
+    forward.last_visited = &last_visited;
+    backward.last_visited = &last_visited;
 }
 
 void DiGraph::insert_edge(NodeID from, NodeID to)
@@ -300,17 +313,17 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
 {
     // propagate remote labels
     vector<NodeID> stack;
-    g.neighbors[node].shrink(g.last_visited);
+    g.neighbors[node].shrink(*g.last_visited);
     for ( Neighbor neighbor : g.neighbors[node] )
         stack.push_back(neighbor.node);
     while ( !stack.empty() )
     {
         NodeID next = stack.back(); stack.pop_back();
-        if ( g.last_visited[next] != node && !sorted_intersect(labels[next], node_labels) )
+        if ( (*g.last_visited)[next] != node && !sorted_intersect(labels[next], node_labels) )
         {
-            g.last_visited[next] = node;
+            (*g.last_visited)[next] = node;
             labels[next].push_back(label);
-            g.neighbors[next].shrink(g.last_visited);
+            g.neighbors[next].shrink(*g.last_visited);
             for ( Neighbor neighbor : g.neighbors[next] )
                 stack.push_back(neighbor.node);
         }
@@ -361,7 +374,7 @@ void update_estimates(PartialGraph &g, PartialGraph &rg, NodeID node, vector<uin
                 }
             }
             if ( shrink_from != DEFAULT )
-                rn.shrink(g.last_visited, shrink_from);
+                rn.shrink(*g.last_visited, shrink_from);
             sort(rn.begin() + pos, rn.end());
             // ready to re-estimate
             new_estimate = rn.size() + rn.back().estimate;
@@ -371,7 +384,7 @@ void update_estimates(PartialGraph &g, PartialGraph &rg, NodeID node, vector<uin
         {
             estimates[next] = new_estimate;
             // shrink again - may not have been visited during label propagation due to label pruning
-            g.neighbors[next].shrink(g.last_visited);
+            g.neighbors[next].shrink(*g.last_visited);
             for ( Neighbor neighbor : g.neighbors[next] )
                 q.push(neighbor.node);
         }
@@ -505,7 +518,10 @@ ostream& operator<<(ostream &os, const LazyList &l)
 
 ostream& operator<<(ostream &os, const DiGraph &g)
 {
-    return os << "DiGraph(\n\tforward=" << g.forward.neighbors << ",\n\tbackward=" << g.backward.neighbors << "\n)";
+    return os << "DiGraph("
+        << "\n\tforward=" << g.forward.neighbors
+        << ",\n\tbackward=" << g.backward.neighbors
+        << "\n)";
 }
 
 ostream& operator<<(ostream &os, const TwoHopCover &c)
