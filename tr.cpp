@@ -59,7 +59,6 @@ vector<pair<NodeID,NodeID>> get_transitive(const DiGraph &g)
 
     const size_t V = g.size();
     vector<uint32_t> flag(V, UINT32_MAX);
-    vector<NodeID> edge(V, DEFAULT);
 
     vector<NodeID> po_stack = po_tree[V];
     vector<NodeID> dfs_stack;
@@ -70,26 +69,16 @@ vector<pair<NodeID,NodeID>> get_transitive(const DiGraph &g)
         NodeID root = po_stack.back(); po_stack.pop_back();
         NodeID po_parent = po_parents[root];
         DEBUG("root=" << root << ", parent=" << po_parent << ", flag=" << flag);
-        uint32_t root_order = dt_order[root];
-        uint32_t parent_order = dt_order[po_parent];
-        // collect grand-children of root, pruning children in sub-tree
+        const uint32_t root_order = dt_order[root];
+        // collect grand children of root, except those in max subtree
         dfs_stack.clear();
         for ( Neighbor child : g.forward.neighbors[root] )
-        {
-            if ( flag[child.node] <= parent_order )
+            if ( child.node != po_parent )
             {
-                transitive_edges.push_back(make_pair(root, child.node));
-                DEBUG("found transitive edge to max sub-tree: " << root << " -> " << child.node);
-            }
-            else
-            {
-                edge[child.node] = root;
-                flag[child.node] = root_order;
                 for ( Neighbor grand_child : g.forward.neighbors[child.node] )
                     dfs_stack.push_back(grand_child.node);
             }
-        }
-        // DFS over g starting from grand children of root, pruning nodes in max subtree
+        // DFS over g to mark grand children of root (those in max subtree are already marked)
         while ( !dfs_stack.empty() )
         {
             NodeID node = dfs_stack.back(); dfs_stack.pop_back();
@@ -97,17 +86,20 @@ vector<pair<NodeID,NodeID>> get_transitive(const DiGraph &g)
             if ( flag[node] > root_order )
             {
                 flag[node] = root_order;
-                if ( edge[node] == root )
-                {
-                    transitive_edges.push_back(make_pair(root, node));
-                    DEBUG("found transitive edge: " << root << " -> " << node);
-                }
-                else
-                {
-                    for ( Neighbor child : g.forward.neighbors[node] )
-                        dfs_stack.push_back(child.node);
-                }
+                for ( Neighbor child : g.forward.neighbors[node] )
+                    dfs_stack.push_back(child.node);
             }
+        }
+        // mark children - those already marked must be grand children
+        for ( Neighbor child : g.forward.neighbors[root] )
+        {
+            if ( flag[child.node] <= root_order )
+            {
+                transitive_edges.push_back(make_pair(root, child.node));
+                DEBUG("found transitive edge: " << root << " -> " << child.node);
+            }
+            else
+                flag[child.node] = root_order;
         }
         // continue DFS on po-tree
         for ( NodeID po_child : po_tree[root] )
