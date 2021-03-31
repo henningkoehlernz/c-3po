@@ -290,17 +290,29 @@ void TwoHopCover::insert_self()
 
 bool TwoHopCover::can_reach_all_self(NodeID from, NodeID to) const
 {
+#ifdef TOP_FILTER
+    if ( from < to )
+        return false;
+#endif
     return sorted_intersect(out[from], in[to]);
 }
 
 bool TwoHopCover::can_reach_remote(NodeID from, NodeID to) const
 {
+#ifdef TOP_FILTER
+    if ( from < to )
+        return false;
+#endif
     return from == to
         || sorted_intersect(out[from], in[to]);
 }
 
 bool TwoHopCover::can_reach_no_self(NodeID from, NodeID to) const
 {
+#ifdef TOP_FILTER
+    if ( from < to )
+        return false;
+#endif
     return from == to
         || std::binary_search(out[from].cbegin(), out[from].cend(), to)
         || std::binary_search(in[to].cbegin(), in[to].cend(), from)

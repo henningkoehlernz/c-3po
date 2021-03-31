@@ -12,6 +12,7 @@
 #define UPDATE_CENTRALITY
 #define RANDOMIZE
 #define ESTIMATE_ANC_DESC
+#define TOP_FILTER
 
 typedef uint32_t NodeID;
 

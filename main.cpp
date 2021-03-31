@@ -38,8 +38,9 @@ int main (int argc, char *argv[])
         pick_order.reserve(g.size());
         auto t_start = chrono::high_resolution_clock::now();
 #ifdef ESTIMATE_ANC_DESC
-        //g.estimate_anc_desc(); remove_tree_transitive(g);
-        size_t removed = remove_transitive(g);
+        g.estimate_anc_desc();
+        size_t removed = remove_tree_transitive(g);
+        //size_t removed = remove_transitive(g);
         cout << "removed " << removed << " transitive edges" << endl;
 #endif
         TwoHopCover cover = pick_propagate_prune(g, pick_order);
