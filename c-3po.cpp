@@ -291,7 +291,7 @@ void TwoHopCover::insert_self()
 bool TwoHopCover::can_reach_all_self(NodeID from, NodeID to) const
 {
 #ifdef TOP_FILTER
-    if ( from < to )
+    if ( from > to )
         return false;
 #endif
     return sorted_intersect(out[from], in[to]);
@@ -300,7 +300,7 @@ bool TwoHopCover::can_reach_all_self(NodeID from, NodeID to) const
 bool TwoHopCover::can_reach_remote(NodeID from, NodeID to) const
 {
 #ifdef TOP_FILTER
-    if ( from < to )
+    if ( from > to )
         return false;
 #endif
     return from == to
@@ -310,7 +310,7 @@ bool TwoHopCover::can_reach_remote(NodeID from, NodeID to) const
 bool TwoHopCover::can_reach_no_self(NodeID from, NodeID to) const
 {
 #ifdef TOP_FILTER
-    if ( from < to )
+    if ( from > to )
         return false;
 #endif
     return from == to
@@ -325,6 +325,7 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
 {
     // propagate remote labels
     vector<NodeID> stack;
+    bool inserted = false;
     g.neighbors[node].shrink(*g.last_visited);
     for ( Neighbor neighbor : g.neighbors[node] )
         stack.push_back(neighbor.node);
@@ -335,13 +336,14 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
         {
             (*g.last_visited)[next] = node;
             labels[next].push_back(label);
+            inserted = true;
             g.neighbors[next].shrink(*g.last_visited);
             for ( Neighbor neighbor : g.neighbors[next] )
                 stack.push_back(neighbor.node);
         }
     }
     // insert self label
-    if ( g.neighbors[node].size() )
+    if ( inserted )
         node_labels.push_back(label);
 }
 

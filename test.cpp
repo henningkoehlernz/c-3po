@@ -68,7 +68,7 @@ vector<pair<NodeID,NodeID>> node_pairs(size_t nodes)
     return pairs;
 }
 
-void test_ppp(DiGraph &g)
+void test_ppp(const DiGraph &g)
 {
     // check actual reachability before graph is consumed
     vector<pair<NodeID,NodeID>> queries = node_pairs(g.size());
@@ -77,7 +77,8 @@ void test_ppp(DiGraph &g)
         can_reach.push_back(can_reach_dfs(g, query.first, query.second));
     // build 2-hop index
     vector<NodeID> pick_order;
-    TwoHopCover cover = pick_propagate_prune(g, pick_order);
+    DiGraph clone(g);
+    TwoHopCover cover = pick_propagate_prune(clone, pick_order);
     // compare
     for ( size_t q = 0; q < queries.size(); ++q )
     {
