@@ -9,7 +9,7 @@
 #define DEBUG(X) //cout << X << endl
 
 // toggles for algorithmic features
-#define MIN_MAX_CENTRALITY
+#define GAIN_COST_CENTRALITY
 #define UPDATE_CENTRALITY
 #define RANDOMIZE
 #define ESTIMATE_ANC_DESC
@@ -20,7 +20,6 @@ typedef uint32_t NodeID;
 static const uint32_t DEFAULT = UINT32_MAX;
 static const uint32_t DELETED = UINT32_MAX - 1;
 
-//typedef uint64_t centrality_t;
 typedef double centrality_t;
 
 struct Neighbor

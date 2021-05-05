@@ -148,10 +148,9 @@ centrality_t DiGraph::centrality(NodeID node) const
     uint64_t in = backward.neighbors[node].size();
     uint64_t out = forward.neighbors[node].size();
 #endif
-#ifdef MIN_MAX_CENTRALITY
-    //return in <= out ? (in << 32) | out : (out << 32) | in;
-    centrality_t gain = (in + 1) * (out + 1);
-    centrality_t cost = in + out + 2;
+#ifdef GAIN_COST_CENTRALITY
+    centrality_t gain = in * out + in + out;
+    centrality_t cost = in + out + 1e-6;
     return gain / cost;
 #else
     return (in + 1) * (out + 1);
