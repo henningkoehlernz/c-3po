@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <iostream>
 #include <vector>
+#include <queue>
 
 #define DEBUG(X) //cout << X << endl
 
@@ -132,6 +133,19 @@ template <typename T1, typename T2>
 std::ostream& operator<<(std::ostream& os, const std::pair<T1,T2> &p)
 {
     return os << "(" << p.first << ", " << p.second << ")";
+}
+
+template <typename T, typename Container, typename Compare>
+std::ostream& operator<<(std::ostream& os, const std::priority_queue<T,Container,Compare> &q)
+{
+    std::priority_queue<T,Container,Compare> copy(q);
+    os << "Q[";
+    while ( !copy.empty() )
+    {
+        os << (copy.size() < q.size() ? ", " : " ") << copy.top();
+        copy.pop();
+    }
+    return os << " ]";
 }
 
 std::ostream& operator<<(std::ostream &os, const Neighbor &n);

@@ -403,7 +403,7 @@ void update_estimates(PartialGraph &g, PartialGraph &rg, NodeID node, vector<Est
         tree_anc = estimates[tree_anc].tree_parent;
     }
     // make sure node is no longer a tree parent
-    for ( Neighbor neighbor : g.neighbors[node] )
+    for ( Neighbor neighbor : rg.neighbors[node] )
         if ( estimates[neighbor.node].tree_parent == node )
             estimates[neighbor.node].tree_parent = DEFAULT;
     // update final estimates (pull)
@@ -518,6 +518,8 @@ TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order)
 #ifdef ESTIMATE_ANC_DESC
             update_estimates<std::greater<NodeID>>(g.forward, g.backward, node, g.anc_estimate);
             update_estimates<std::less<NodeID>>(g.backward, g.forward, node, g.desc_estimate);
+            DEBUG("\tanc_estimate=" << g.anc_estimate);
+            DEBUG("\tdesc_estimate=" << g.desc_estimate);
 #endif
             pick_order.push_back(node);
         }
