@@ -57,6 +57,16 @@ public:
     bool deleted(NodeID node) const;
 };
 
+class Estimate
+{
+public:
+    uint32_t estimate;
+    uint32_t tree_estimate;
+    NodeID tree_parent;
+
+    Estimate();
+};
+
 class DiGraph
 {
     // for tracking deleted & visited nodes during propagation
@@ -65,8 +75,8 @@ public:
     PartialGraph forward;
     PartialGraph backward;
 #ifdef ESTIMATE_ANC_DESC
-    std::vector<uint32_t> anc_estimate; // total #ancestors
-    std::vector<uint32_t> desc_estimate; // total #descendants
+    std::vector<Estimate> anc_estimate;
+    std::vector<Estimate> desc_estimate;
 #endif
 
     DiGraph(size_t size);
@@ -76,6 +86,7 @@ public:
     uint64_t centrality(NodeID node) const;
     size_t size() const;
 #ifdef ESTIMATE_ANC_DESC
+    void init_estimate_trees();
     void estimate_anc_desc();
 #endif
 };
@@ -125,5 +136,6 @@ std::ostream& operator<<(std::ostream& os, const std::pair<T1,T2> &p)
 
 std::ostream& operator<<(std::ostream &os, const Neighbor &n);
 std::ostream& operator<<(std::ostream &os, const LazyList &l);
+std::ostream& operator<<(std::ostream &os, const Estimate &n);
 std::ostream& operator<<(std::ostream &os, const DiGraph &g);
 std::ostream& operator<<(std::ostream &os, const TwoHopCover &c);

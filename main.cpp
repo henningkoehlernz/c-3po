@@ -38,7 +38,7 @@ int main (int argc, char *argv[])
         pick_order.reserve(g.size());
         auto t_start = chrono::high_resolution_clock::now();
 #ifdef ESTIMATE_ANC_DESC
-        g.estimate_anc_desc();
+        g.init_estimate_trees();
         size_t removed = remove_tree_transitive(g);
         //size_t removed = remove_transitive(g);
         cout << "removed " << removed << " transitive edges" << endl;
