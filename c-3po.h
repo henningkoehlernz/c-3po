@@ -20,6 +20,9 @@ typedef uint32_t NodeID;
 static const uint32_t DEFAULT = UINT32_MAX;
 static const uint32_t DELETED = UINT32_MAX - 1;
 
+//typedef uint64_t centrality_t;
+typedef double centrality_t;
+
 struct Neighbor
 {
     NodeID node;
@@ -84,7 +87,7 @@ public:
     DiGraph(const DiGraph &g);
     void insert_edge(NodeID from, NodeID to);
     void remove_node(NodeID node);
-    uint64_t centrality(NodeID node) const;
+    centrality_t centrality(NodeID node) const;
     size_t size() const;
 #ifdef ESTIMATE_ANC_DESC
     void init_estimate_trees();

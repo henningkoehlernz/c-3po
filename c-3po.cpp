@@ -139,7 +139,7 @@ void DiGraph::remove_node(NodeID node)
     last_visited[node] = DELETED;
 }
 
-uint64_t DiGraph::centrality(NodeID node) const
+centrality_t DiGraph::centrality(NodeID node) const
 {
 #ifdef ESTIMATE_ANC_DESC
     uint64_t in = anc_estimate[node].estimate;
@@ -149,7 +149,10 @@ uint64_t DiGraph::centrality(NodeID node) const
     uint64_t out = forward.neighbors[node].size();
 #endif
 #ifdef MIN_MAX_CENTRALITY
-    return in <= out ? (in << 32) | out : (out << 32) | in;
+    //return in <= out ? (in << 32) | out : (out << 32) | in;
+    centrality_t gain = (in + 1) * (out + 1);
+    centrality_t cost = in + out + 2;
+    return gain / cost;
 #else
     return (in + 1) * (out + 1);
 #endif
@@ -463,10 +466,10 @@ void update_estimates(PartialGraph &g, PartialGraph &rg, NodeID node, vector<Est
 class WeightedNode
 {
 public:
-    uint64_t weight;
-    uint32_t node;
+    centrality_t weight;
+    NodeID node;
 
-    WeightedNode(uint64_t weight, uint32_t node) : weight(weight), node(node) {}
+    WeightedNode(centrality_t weight, NodeID node) : weight(weight), node(node) {}
 
     bool operator<(WeightedNode other) const
     {
@@ -501,7 +504,7 @@ TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order)
         g.remove_node(node);
         pick_order.push_back(node);
 #else
-        uint64_t new_weight = g.centrality(node);
+        centrality_t new_weight = g.centrality(node);
         if ( new_weight < weighted.weight )
         {
             weighted.weight = new_weight;
