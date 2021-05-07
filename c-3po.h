@@ -13,6 +13,7 @@
 #define UPDATE_CENTRALITY
 #define RANDOMIZE
 #define ESTIMATE_ANC_DESC
+//#define TREE_ESTIMATE
 #define TOP_FILTER
 
 typedef uint32_t NodeID;
@@ -64,9 +65,11 @@ class Estimate
 {
 public:
     uint32_t estimate;
+#ifdef TREE_ESTIMATE
     uint32_t tree_estimate;
     uint32_t tree_sum;
     NodeID tree_parent;
+#endif
 
     Estimate();
 };
