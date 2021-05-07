@@ -13,7 +13,7 @@
 #define UPDATE_CENTRALITY
 #define RANDOMIZE
 #define ESTIMATE_ANC_DESC
-//#define TREE_ESTIMATE
+#define TREE_ESTIMATE
 #define TOP_FILTER
 
 typedef uint32_t NodeID;
@@ -22,12 +22,13 @@ static const uint32_t DEFAULT = UINT32_MAX;
 static const uint32_t DELETED = UINT32_MAX - 1;
 
 typedef double centrality_t;
+typedef float estimate_t;
 
 struct Neighbor
 {
     NodeID node;
 #ifdef ESTIMATE_ANC_DESC
-    uint32_t estimate;
+    estimate_t estimate;
     bool operator<(Neighbor other);
 #endif
     Neighbor(NodeID node);
@@ -64,11 +65,12 @@ public:
 class Estimate
 {
 public:
-    uint32_t estimate;
+    estimate_t estimate;
 #ifdef TREE_ESTIMATE
-    uint32_t tree_estimate;
-    uint32_t tree_sum;
-    NodeID tree_parent;
+    estimate_t tree_estimate;
+    estimate_t tree_sum;
+    //NodeID tree_parent;
+    uint32_t orig_degree;
 #endif
 
     Estimate();

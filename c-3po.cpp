@@ -107,7 +107,8 @@ Estimate::Estimate() : estimate(0)
 #ifdef TREE_ESTIMATE
     tree_estimate = 0;
     tree_sum = 0;
-    tree_parent = DEFAULT;
+    //tree_parent = DEFAULT;
+    orig_degree = 0;
 #endif
 }
 
@@ -149,11 +150,11 @@ void DiGraph::remove_node(NodeID node)
 centrality_t DiGraph::centrality(NodeID node) const
 {
 #ifdef ESTIMATE_ANC_DESC
-    uint64_t in = anc_estimate[node].estimate;
-    uint64_t out = desc_estimate[node].estimate;
+    centrality_t in = anc_estimate[node].estimate;
+    centrality_t out = desc_estimate[node].estimate;
 #else
-    uint64_t in = backward.neighbors[node].size();
-    uint64_t out = forward.neighbors[node].size();
+    centrality_t in = backward.neighbors[node].size();
+    centrality_t out = forward.neighbors[node].size();
 #endif
 #ifdef GAIN_COST_CENTRALITY
     centrality_t gain = in * out + in + out;
@@ -182,7 +183,7 @@ void DiGraph::init_estimate_trees()
                 parent.estimate = anc_estimate[parent.node].estimate;
             sort(parents.begin(), parents.end());
 #ifdef TREE_ESTIMATE
-            desc_estimate[node].tree_parent = parents.back().node;
+            //desc_estimate[node].tree_parent = parents.back().node;
 #endif
             anc_estimate[node].estimate = parents.size() + parents.back().estimate;
         }
@@ -195,16 +196,16 @@ void DiGraph::init_estimate_trees()
                 child.estimate = desc_estimate[child.node].estimate;
             sort(children.begin(), children.end());
 #ifdef TREE_ESTIMATE
-            anc_estimate[rev].tree_parent = children.back().node;
+            //anc_estimate[rev].tree_parent = children.back().node;
 #endif
             desc_estimate[rev].estimate = children.size() + children.back().estimate;
         }
     }
 }
 
-uint32_t get_estimate(const LazyList &neighbors, const Estimate &estimate)
+estimate_t get_estimate(const LazyList &neighbors, const Estimate &estimate)
 {
-    uint32_t max_estimate = neighbors.size() + neighbors.back().estimate;
+    estimate_t max_estimate = neighbors.size() + neighbors.back().estimate;
 #ifdef TREE_ESTIMATE
     return max(max_estimate, estimate.tree_estimate);
 #else
@@ -219,8 +220,10 @@ void DiGraph::estimate_anc_desc()
     {
 #ifdef TREE_ESTIMATE
         // init tree estimate
-        if ( anc_estimate[node].tree_parent != DEFAULT )
-            anc_estimate[anc_estimate[node].tree_parent].tree_sum += anc_estimate[node].tree_sum + 1;
+        //if ( anc_estimate[node].tree_parent != DEFAULT )
+        //    anc_estimate[anc_estimate[node].tree_parent].tree_sum += anc_estimate[node].tree_sum + 1;
+        // store original in/out degrees
+        anc_estimate[node].orig_degree = forward.neighbors[node].size();
 #endif
         // compure total estimate
         LazyList &parents = backward.neighbors[node];
@@ -230,17 +233,20 @@ void DiGraph::estimate_anc_desc()
             {
                 parent.estimate = anc_estimate[parent.node].estimate;
 #ifdef TREE_ESTIMATE
-                anc_estimate[node].tree_estimate += anc_estimate[parent.node].tree_sum + 1;
+                //anc_estimate[node].tree_estimate += anc_estimate[parent.node].tree_sum + 1;
+                anc_estimate[node].tree_sum += (1 + anc_estimate[parent.node].tree_sum) / anc_estimate[parent.node].orig_degree;
+                anc_estimate[node].tree_estimate += 1 + anc_estimate[parent.node].tree_sum / anc_estimate[parent.node].orig_degree;
 #endif
             }
             sort(parents.begin(), parents.end());
             anc_estimate[node].estimate = get_estimate(parents, anc_estimate[node]);
         }
         // compute descendants estimates in reverse order
-        NodeID rev = size() - node - 1;
+        const NodeID rev = size() - node - 1;
 #ifdef TREE_ESTIMATE
-        if ( desc_estimate[rev].tree_parent != DEFAULT )
-            desc_estimate[desc_estimate[rev].tree_parent].tree_sum += desc_estimate[rev].tree_sum + 1;
+        //if ( desc_estimate[rev].tree_parent != DEFAULT )
+        //    desc_estimate[desc_estimate[rev].tree_parent].tree_sum += desc_estimate[rev].tree_sum + 1;
+        desc_estimate[rev].orig_degree = backward.neighbors[rev].size();
 #endif
         LazyList &children = forward.neighbors[rev];
         if ( children.size() > 0 )
@@ -249,7 +255,9 @@ void DiGraph::estimate_anc_desc()
             {
                 child.estimate = desc_estimate[child.node].estimate;
 #ifdef TREE_ESTIMATE
-                desc_estimate[rev].tree_estimate += desc_estimate[child.node].tree_sum + 1;
+                //desc_estimate[rev].tree_estimate += desc_estimate[child.node].tree_sum + 1;
+                desc_estimate[rev].tree_sum += (1 + desc_estimate[child.node].tree_sum) / desc_estimate[child.node].orig_degree;
+                desc_estimate[rev].tree_estimate += 1 + desc_estimate[child.node].tree_sum / desc_estimate[child.node].orig_degree;
 #endif
             }
             sort(children.begin(), children.end());
@@ -426,11 +434,14 @@ void propagate_prune(PartialGraph &g, NodeID node, NodeID label, LabelSet &node_
 template<class TopCompare>
 void update_estimates(PartialGraph &g, PartialGraph &rg, NodeID node, vector<Estimate> &estimates)
 {
+    if ( g.neighbors[node].size() == 0 )
+        return;
     priority_queue<NodeID, vector<NodeID>, TopCompare> q;
     for ( Neighbor neighbor : g.neighbors[node] )
         q.push(neighbor.node);
 #ifdef TREE_ESTIMATE
     // update tree estimates (push)
+    /*
     NodeID tree_anc = node;
     while ( tree_anc != DEFAULT )
     {
@@ -450,6 +461,39 @@ void update_estimates(PartialGraph &g, PartialGraph &rg, NodeID node, vector<Est
     for ( Neighbor neighbor : rg.neighbors[node] )
         if ( estimates[neighbor.node].tree_parent == node )
             estimates[neighbor.node].tree_parent = DEFAULT;
+    */
+    struct NodeChange
+    {
+        NodeID node;
+        estimate_t change;
+        bool operator<(const NodeChange &other) const { TopCompare cmp; return cmp(node, other.node); }
+        NodeChange(NodeID node, estimate_t change) : node(node), change(change) {}
+    };
+    priority_queue<NodeChange> tree_q;
+    estimate_t sum_change = (1 + estimates[node].tree_sum) / estimates[node].orig_degree;
+    estimate_t estimate_delta = 1 - (1 / estimates[node].orig_degree);
+    for ( Neighbor neighbor : g.neighbors[node] )
+    {
+        estimates[neighbor.node].tree_estimate -= estimate_delta;
+        tree_q.push(NodeChange(neighbor.node, sum_change));
+    }
+    while ( !tree_q.empty() )
+    {
+        NodeChange next = tree_q.top(); tree_q.pop();
+        // aggregate changes
+        while ( !tree_q.empty() && tree_q.top().node == next.node )
+        {
+            next.change += tree_q.top().change;
+            tree_q.pop();
+        }
+        // only update estimates of ancestors that might be affected by tree estimate reduction
+        if ( estimates[next.node].tree_estimate == estimates[next.node].estimate )
+            q.push(next.node);
+        estimates[next.node].tree_sum -= next.change;
+        estimates[next.node].tree_estimate -= next.change;
+        for ( Neighbor neighbor : g.neighbors[next.node] )
+            tree_q.push(NodeChange(neighbor.node, next.change / estimates[next.node].orig_degree));
+    }
 #endif
     // update final estimates (pull)
     while ( !q.empty() )
@@ -635,8 +679,9 @@ ostream& operator<<(ostream &os, const Estimate &e)
 #ifdef TREE_ESTIMATE
     os << "E(e=" << e.estimate;
     os << ", te=" << e.tree_estimate << ", ts=" << e.tree_sum;
-    if ( e.tree_parent != DEFAULT )
-        os << ", tp=" << e.tree_parent;
+    //if ( e.tree_parent != DEFAULT )
+    //    os << ", tp=" << e.tree_parent;
+    os << ", deg=" << e.orig_degree;
     return os << ")";
 #else
     return os << e.estimate;
