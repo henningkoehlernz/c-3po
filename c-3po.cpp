@@ -102,7 +102,7 @@ bool PartialGraph::deleted(NodeID node) const {
 
 //------------------------- Estimate --------------------------------
 
-Estimate::Estimate() : estimate(0), tree_estimate(0), tree_parent(DEFAULT) {}
+Estimate::Estimate() : estimate(0), tree_estimate(0), tree_sum(0), tree_parent(DEFAULT) {}
 
 //------------------------- DiGraph ---------------------------------
 
@@ -198,25 +198,31 @@ void DiGraph::estimate_anc_desc()
     {
         // init tree estimate
         if ( anc_estimate[node].tree_parent != DEFAULT )
-            anc_estimate[anc_estimate[node].tree_parent].tree_estimate += anc_estimate[node].tree_estimate + 1;
+            anc_estimate[anc_estimate[node].tree_parent].tree_sum += anc_estimate[node].tree_sum + 1;
         // compure total estimate
         LazyList &parents = backward.neighbors[node];
         if ( parents.size() > 0 )
         {
             for ( Neighbor &parent : parents )
+            {
                 parent.estimate = anc_estimate[parent.node].estimate;
+                anc_estimate[node].tree_estimate += anc_estimate[parent.node].tree_sum + 1;
+            }
             sort(parents.begin(), parents.end());
             anc_estimate[node].estimate = max(static_cast<uint32_t>(parents.size()) + parents.back().estimate, anc_estimate[node].tree_estimate);
         }
         // compute descendants estimates in reverse order
         NodeID rev = size() - node - 1;
         if ( desc_estimate[rev].tree_parent != DEFAULT )
-            desc_estimate[desc_estimate[rev].tree_parent].tree_estimate += desc_estimate[rev].tree_estimate + 1;
+            desc_estimate[desc_estimate[rev].tree_parent].tree_sum += desc_estimate[rev].tree_sum + 1;
         LazyList &children = forward.neighbors[rev];
         if ( children.size() > 0 )
         {
             for ( Neighbor &child : children )
+            {
                 child.estimate = desc_estimate[child.node].estimate;
+                desc_estimate[rev].tree_estimate += desc_estimate[child.node].tree_sum + 1;
+            }
             sort(children.begin(), children.end());
             desc_estimate[rev].estimate = max(static_cast<uint32_t>(children.size()) + children.back().estimate, desc_estimate[rev].tree_estimate);
         }
@@ -395,14 +401,20 @@ void update_estimates(PartialGraph &g, PartialGraph &rg, NodeID node, vector<Est
     for ( Neighbor neighbor : g.neighbors[node] )
         q.push(neighbor.node);
     // update tree estimates (push)
-    NodeID tree_anc = estimates[node].tree_parent;
+    NodeID tree_anc = node;
     while ( tree_anc != DEFAULT )
     {
-        // only update estimates of ancestors that might be affected by tree estimate reduction
-        if ( estimates[tree_anc].tree_estimate == estimates[tree_anc].estimate )
-            q.push(tree_anc);
-        estimates[tree_anc].tree_estimate -= estimates[node].tree_estimate + 1;
-        tree_anc = estimates[tree_anc].tree_parent;
+        const NodeID tree_parent = estimates[tree_anc].tree_parent;
+        if ( tree_parent != DEFAULT )
+            estimates[tree_parent].tree_sum -= estimates[node].tree_sum + 1;
+        for ( Neighbor neighbor : g.neighbors[tree_anc] )
+        {
+            // only update estimates of ancestors that might be affected by tree estimate reduction
+            if ( estimates[neighbor.node].tree_estimate == estimates[neighbor.node].estimate )
+                q.push(neighbor.node);
+            estimates[neighbor.node].tree_estimate -= estimates[node].tree_sum + 1;
+        }
+        tree_anc = tree_parent;
     }
     // make sure node is no longer a tree parent
     for ( Neighbor neighbor : rg.neighbors[node] )
@@ -448,7 +460,7 @@ void update_estimates(PartialGraph &g, PartialGraph &rg, NodeID node, vector<Est
             // ready to re-estimate
             new_estimate = max(static_cast<uint32_t>(rn.size()) + rn.back().estimate, estimates[next].tree_estimate);
         }
-        // check if estimated value changed, as transitive edges can cause multiple visits
+        // check if estimated value changed, as transitive edges and tree estimate updates can cause multiple visits
         if ( new_estimate < estimates[next].estimate )
         {
             estimates[next].estimate = new_estimate;
@@ -511,7 +523,7 @@ TwoHopCover pick_propagate_prune(DiGraph &g, vector<NodeID> &pick_order)
         }
         else
         {
-            DEBUG("picked " << node << " with C=[" << (new_weight >> 32) << ", " << (new_weight & 0xffffffffu) << "]");
+            DEBUG("picked " << node << " with C=" << new_weight);
             // use ascending labels so that label sets can simply be appended
             const NodeID label = pick_order.size();
             propagate_prune(g.forward, node, label, labels.out[node], labels.in);
@@ -589,7 +601,7 @@ ostream& operator<<(ostream &os, const LazyList &l)
 
 ostream& operator<<(ostream &os, const Estimate &e)
 {
-    os << "E(e=" << e.estimate << ", te=" << e.tree_estimate;
+    os << "E(e=" << e.estimate << ", te=" << e.tree_estimate << ", ts=" << e.tree_sum;
     if ( e.tree_parent != DEFAULT )
         os << ", tp=" << e.tree_parent;
     return os << ")";

@@ -65,6 +65,7 @@ class Estimate
 public:
     uint32_t estimate;
     uint32_t tree_estimate;
+    uint32_t tree_sum;
     NodeID tree_parent;
 
     Estimate();
