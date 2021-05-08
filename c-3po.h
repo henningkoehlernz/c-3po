@@ -92,6 +92,7 @@ public:
     void remove_node(NodeID node);
     centrality_t centrality(NodeID node) const;
     size_t size() const;
+    size_t edges() const;
 #ifdef ESTIMATE_ANC_DESC
     void init_estimate_trees();
     void estimate_anc_desc();

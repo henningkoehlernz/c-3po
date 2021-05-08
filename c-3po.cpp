@@ -169,6 +169,14 @@ size_t DiGraph::size() const
     return last_visited.size();
 }
 
+size_t DiGraph::edges() const
+{
+    size_t ecount = 0;
+    for ( const LazyList &neighbors : forward.neighbors )
+        ecount += neighbors.size();
+    return ecount;
+}
+
 #ifdef ESTIMATE_ANC_DESC
 void DiGraph::init_estimate_trees()
 {

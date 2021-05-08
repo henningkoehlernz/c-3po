@@ -36,6 +36,7 @@ int main (int argc, char *argv[])
         DEBUG("g=" << g);
         vector<NodeID> pick_order;
         pick_order.reserve(g.size());
+        DiGraph g_tr(g); // keep copy for later
         auto t_start = chrono::high_resolution_clock::now();
 #ifdef ESTIMATE_ANC_DESC
         g.init_estimate_trees();
@@ -53,6 +54,10 @@ int main (int argc, char *argv[])
         size_t remote_labels = cover.labels() - self_labels;
         cout << "found 2-hop cover with " << remote_labels << " remote and " << self_labels << " self labels in " << static_cast<double>(dur_ms) / 1000.0 << "s" << endl;
         cout << "=> Index size = " << l2mb(remote_labels) << " + " << l2mb(self_labels) << " = " << l2mb(remote_labels + self_labels) << " MB" << endl;
+        // find lower bound for remote labels (#edges in transitive reduction)
+        remove_transitive(g_tr);
+        size_t min_remote = g_tr.edges();
+        cout << "lower bound for remote labels = " << min_remote << " (" << l2mb(min_remote) << " MB)" << endl;
         // test query speed
         vector<Query> queries;
         for ( size_t i = 0; i < query_count; ++i )
