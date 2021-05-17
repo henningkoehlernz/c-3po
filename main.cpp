@@ -60,31 +60,38 @@ int main (int argc, char *argv[])
         cout << "lower bound for remote labels = " << min_remote << " (" << l2mb(min_remote) << " MB)" << endl;
         // test query speed
         vector<Query> queries;
+        srand(1); // ensure identical querys between runs
         for ( size_t i = 0; i < query_count; ++i )
             queries.push_back(random_query(g.size()));
         // time all three label storage variants
+        size_t reach_count = 0;
         t_start = chrono::high_resolution_clock::now();
         for ( Query q : queries )
-            cover.can_reach_remote(q.from, q.to);
+            if ( cover.can_reach_remote(q.from, q.to) )
+                reach_count++;
         t_stop = chrono::high_resolution_clock::now();
         long dur_remote = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
-        cout << "Processed " << query_count << " queries in " << dur_remote << "ms using remote-referenced self-labels" << endl;
+        cout << "Processed " << query_count << " queries in " << dur_remote << "ms using remote-referenced self-labels (" << reach_count << " positive)" << endl;
         // no self-labels
         cover.erase_self();
+        reach_count = 0;
         t_start = chrono::high_resolution_clock::now();
         for ( Query q : queries )
-            cover.can_reach_no_self(q.from, q.to);
+            if ( cover.can_reach_no_self(q.from, q.to) )
+                reach_count++;
         t_stop = chrono::high_resolution_clock::now();
         long dur_no_self = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
-        cout << "Processed " << query_count << " queries in " << dur_no_self << "ms using no self-labels" << endl;
+        cout << "Processed " << query_count << " queries in " << dur_no_self << "ms using no self-labels (" << reach_count << " positive)" << endl;
         // all self-labels
         cover.insert_self();
+        reach_count = 0;
         t_start = chrono::high_resolution_clock::now();
         for ( Query q : queries )
-            cover.can_reach_all_self(q.from, q.to);
+            if ( cover.can_reach_all_self(q.from, q.to) )
+                reach_count++;
         t_stop = chrono::high_resolution_clock::now();
         long dur_all_self = chrono::duration_cast<chrono::milliseconds>(t_stop - t_start).count();
-        cout << "Processed " << query_count << " queries in " << dur_all_self << "ms using all self-labels" << endl;
+        cout << "Processed " << query_count << " queries in " << dur_all_self << "ms using all self-labels (" << reach_count << " positive)" << endl;
     }
     return 0;
 }
