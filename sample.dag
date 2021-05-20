@@ -1,0 +1,8 @@
+8 <- number of nodes (rest of line is ignored), remaining lines are node child_1 ... child_n
+0 2 4
+1 2 3
+2 4 5
+3 5
+4 6
+5 6 7
+6 7
