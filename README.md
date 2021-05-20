@@ -14,4 +14,7 @@ Note that this will download over 1 GB worth of graph data.
 ## Running the code
 
 Run `make` to build, then `./c3po < sample.dag` or `./c3po sample.dag` to run the algorithm with sample.dag as input.
+
+To run the algorithm for all graphs in the submodule, use `sh run.sh`.
+
 To run variants of the algorithm, edit c-3po.h and (un)comment the relevant `#define` statements.
